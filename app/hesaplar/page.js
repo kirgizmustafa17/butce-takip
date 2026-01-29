@@ -16,7 +16,7 @@ export default function HesaplarPage() {
   const [transactionModalOpen, setTransactionModalOpen] = useState(false);
   const [cardPaymentModalOpen, setCardPaymentModalOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState(null);
-  const [selectedAccount, setSelectedAccount] = useState(null);
+  const [editingTransaction, setEditingTransaction] = useState(null);
   const { addToast } = useToast();
 
   // Form state
@@ -311,6 +311,143 @@ export default function HesaplarPage() {
 
     addToast(transactionData.type === 'income' ? 'Gelir eklendi' : 'Gider eklendi', 'success');
     setTransactionModalOpen(false);
+    setEditingTransaction(null);
+    fetchData();
+  }
+
+  function openEditTransactionModal(tx) {
+    setEditingTransaction(tx);
+    setTransactionData({
+      account_id: tx.account_id,
+      type: tx.type,
+      description: tx.description,
+      amount: tx.amount.toString(),
+      transaction_date: tx.transaction_date,
+    });
+    setTransactionModalOpen(true);
+  }
+
+  async function handleUpdateTransaction(e) {
+    e.preventDefault();
+
+    const amount = parseFloat(transactionData.amount);
+    if (!amount || amount <= 0) {
+      addToast('Geçerli bir tutar girin', 'error');
+      return;
+    }
+
+    const account = accounts.find(a => a.id === transactionData.account_id);
+    if (!account) {
+      addToast('Hesap seçin', 'error');
+      return;
+    }
+
+    const oldTx = editingTransaction;
+    const oldAccount = accounts.find(a => a.id === oldTx.account_id);
+    
+    // Calculate balance adjustments
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const oldTxDate = new Date(oldTx.transaction_date);
+    oldTxDate.setHours(0, 0, 0, 0);
+    const wasApplied = oldTxDate <= today;
+    
+    const newTxDate = new Date(transactionData.transaction_date);
+    newTxDate.setHours(0, 0, 0, 0);
+    const willBeApplied = newTxDate <= today;
+
+    // Update the transaction record
+    const { error: txError } = await supabase
+      .from('transactions')
+      .update({
+        account_id: transactionData.account_id,
+        type: transactionData.type,
+        description: transactionData.description,
+        amount: amount,
+        transaction_date: transactionData.transaction_date,
+      })
+      .eq('id', oldTx.id);
+
+    if (txError) {
+      addToast('İşlem güncellenemedi: ' + txError.message, 'error');
+      return;
+    }
+
+    // Reverse old balance effect if it was applied
+    if (wasApplied && oldAccount) {
+      const reversedBalance = oldTx.type === 'income' 
+        ? oldAccount.balance - oldTx.amount 
+        : oldAccount.balance + oldTx.amount;
+      
+      await supabase
+        .from('bank_accounts')
+        .update({ balance: reversedBalance })
+        .eq('id', oldAccount.id);
+    }
+
+    // Apply new balance effect if needed (refetch account for current balance)
+    if (willBeApplied) {
+      const { data: currentAccount } = await supabase
+        .from('bank_accounts')
+        .select('balance')
+        .eq('id', transactionData.account_id)
+        .single();
+      
+      if (currentAccount) {
+        const newBalance = transactionData.type === 'income' 
+          ? currentAccount.balance + amount 
+          : currentAccount.balance - amount;
+
+        await supabase
+          .from('bank_accounts')
+          .update({ balance: newBalance })
+          .eq('id', transactionData.account_id);
+      }
+    }
+
+    addToast('İşlem güncellendi', 'success');
+    setTransactionModalOpen(false);
+    setEditingTransaction(null);
+    fetchData();
+  }
+
+  async function handleDeleteTransaction(tx) {
+    if (!confirm(`"${tx.description}" işlemini silmek istediğinizden emin misiniz?`)) return;
+
+    const account = accounts.find(a => a.id === tx.account_id);
+    
+    // Calculate if balance was affected
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const txDate = new Date(tx.transaction_date);
+    txDate.setHours(0, 0, 0, 0);
+    const wasApplied = txDate <= today;
+
+    // Delete the transaction
+    const { error } = await supabase
+      .from('transactions')
+      .delete()
+      .eq('id', tx.id);
+
+    if (error) {
+      addToast('İşlem silinemedi: ' + error.message, 'error');
+      return;
+    }
+
+    // Reverse balance effect if it was applied
+    if (wasApplied && account) {
+      const newBalance = tx.type === 'income' 
+        ? account.balance - tx.amount 
+        : account.balance + tx.amount;
+
+      await supabase
+        .from('bank_accounts')
+        .update({ balance: newBalance })
+        .eq('id', account.id);
+    }
+
+    addToast('İşlem silindi', 'success');
     fetchData();
   }
 
@@ -569,6 +706,7 @@ export default function HesaplarPage() {
                   <th>Açıklama</th>
                   <th>Tür</th>
                   <th className="text-right">Tutar</th>
+                  <th className="text-right">İşlemler</th>
                 </tr>
               </thead>
               <tbody>
@@ -586,6 +724,28 @@ export default function HesaplarPage() {
                       </td>
                       <td className={`text-right font-bold ${tx.type === 'income' ? 'text-success' : 'text-danger'}`}>
                         {tx.type === 'income' ? '+' : '-'}{formatCurrency(tx.amount)}
+                      </td>
+                      <td className="text-right">
+                        <div className="flex gap-xs justify-end">
+                          <button 
+                            className="btn btn-ghost btn-icon" 
+                            onClick={() => openEditTransactionModal(tx)}
+                            title="Düzenle"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" width="16" height="16">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
+                            </svg>
+                          </button>
+                          <button 
+                            className="btn btn-ghost btn-icon text-danger" 
+                            onClick={() => handleDeleteTransaction(tx)}
+                            title="Sil"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" width="16" height="16">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                            </svg>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -769,10 +929,10 @@ export default function HesaplarPage() {
       {/* Transaction Modal (Income/Expense) */}
       <Modal 
         isOpen={transactionModalOpen} 
-        onClose={() => setTransactionModalOpen(false)}
-        title="Gelir / Gider Ekle"
+        onClose={() => { setTransactionModalOpen(false); setEditingTransaction(null); }}
+        title={editingTransaction ? 'İşlem Düzenle' : 'Gelir / Gider Ekle'}
       >
-        <form onSubmit={handleTransaction}>
+        <form onSubmit={editingTransaction ? handleUpdateTransaction : handleTransaction}>
           <div className="form-group">
             <label className="form-label">Hesap *</label>
             <select
@@ -849,11 +1009,13 @@ export default function HesaplarPage() {
           </div>
 
           <div className="modal-footer" style={{ padding: 0, marginTop: 'var(--spacing-lg)', borderTop: 'none' }}>
-            <button type="button" className="btn btn-secondary" onClick={() => setTransactionModalOpen(false)}>
+            <button type="button" className="btn btn-secondary" onClick={() => { setTransactionModalOpen(false); setEditingTransaction(null); }}>
               İptal
             </button>
             <button type="submit" className={`btn ${transactionData.type === 'income' ? 'btn-success' : 'btn-danger'}`}>
-              {transactionData.type === 'income' ? 'Gelir Ekle' : 'Gider Ekle'}
+              {editingTransaction 
+                ? 'Güncelle' 
+                : (transactionData.type === 'income' ? 'Gelir Ekle' : 'Gider Ekle')}
             </button>
           </div>
         </form>
