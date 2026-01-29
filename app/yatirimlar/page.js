@@ -633,6 +633,7 @@ export default function YatirimlarPage() {
                   <th className="text-right">Miktar</th>
                   <th className="text-right">Birim Fiyat</th>
                   <th className="text-right">Toplam</th>
+                  <th>Açıklama</th>
                   <th className="text-right">İşlem</th>
                 </tr>
               </thead>
@@ -653,6 +654,9 @@ export default function YatirimlarPage() {
                       <td className="text-right">{formatCurrency(tx.price_per_unit)}</td>
                       <td className={`text-right font-bold ${tx.type === 'buy' ? 'text-danger' : 'text-success'}`}>
                         {tx.type === 'buy' ? '-' : '+'}{formatCurrency(tx.total_amount)}
+                      </td>
+                      <td title={tx.notes || ''} style={{ maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {tx.notes ? (tx.notes.length > 20 ? tx.notes.substring(0, 20) + '...' : tx.notes) : '-'}
                       </td>
                       <td className="text-right">
                         <div className="flex gap-sm justify-end">
