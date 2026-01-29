@@ -2,16 +2,21 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, formatDate, calculateDueDate } from '@/lib/utils';
 import { useToast } from '@/components/ui/Toast';
 import Modal from '@/components/ui/Modal';
 
 export default function HesaplarPage() {
   const [accounts, setAccounts] = useState([]);
+  const [cards, setCards] = useState([]);
+  const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [transactionModalOpen, setTransactionModalOpen] = useState(false);
+  const [cardPaymentModalOpen, setCardPaymentModalOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState(null);
+  const [selectedAccount, setSelectedAccount] = useState(null);
   const { addToast } = useToast();
 
   // Form state
@@ -32,23 +37,50 @@ export default function HesaplarPage() {
     description: '',
   });
 
+  // Transaction state (income/expense)
+  const [transactionData, setTransactionData] = useState({
+    account_id: '',
+    type: 'expense',
+    description: '',
+    amount: '',
+    transaction_date: new Date().toISOString().split('T')[0],
+  });
+
+  // Card payment state
+  const [cardPaymentData, setCardPaymentData] = useState({
+    card_id: '',
+    account_id: '',
+    amount: '',
+    payment_date: new Date().toISOString().split('T')[0],
+    description: '',
+  });
+
   useEffect(() => {
-    fetchAccounts();
+    fetchData();
   }, []);
 
-  async function fetchAccounts() {
+  async function fetchData() {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('bank_accounts')
-      .select('*')
-      .order('is_favorite', { ascending: false })
-      .order('name');
+    const [accountsRes, cardsRes, transactionsRes] = await Promise.all([
+      supabase.from('bank_accounts').select('*').order('is_favorite', { ascending: false }).order('name'),
+      supabase.from('credit_cards').select('*, card_transactions(*)'),
+      supabase.from('transactions').select('*').order('transaction_date', { ascending: false }).limit(50),
+    ]);
 
-    if (error) {
-      addToast('Hesaplar yüklenirken hata oluştu', 'error');
-    } else {
-      setAccounts(data || []);
+    if (!accountsRes.error) setAccounts(accountsRes.data || []);
+    if (!cardsRes.error) {
+      const cardsWithDebt = (cardsRes.data || []).map(card => {
+        const unpaidTransactions = (card.card_transactions || []).filter(t => !t.is_paid);
+        const totalDebt = unpaidTransactions.reduce((sum, t) => {
+          if (t.installments > 1) return sum + (t.amount / t.installments);
+          return sum + t.amount;
+        }, 0);
+        return { ...card, current_debt: totalDebt };
+      });
+      setCards(cardsWithDebt);
     }
+    if (!transactionsRes.error) setTransactions(transactionsRes.data || []);
+    
     setLoading(false);
   }
 
@@ -76,6 +108,29 @@ export default function HesaplarPage() {
       is_favorite: account.is_favorite,
     });
     setModalOpen(true);
+  }
+
+  function openTransactionModal(account = null) {
+    setTransactionData({
+      account_id: account?.id || '',
+      type: 'expense',
+      description: '',
+      amount: '',
+      transaction_date: new Date().toISOString().split('T')[0],
+    });
+    setTransactionModalOpen(true);
+  }
+
+  function openCardPaymentModal(card = null) {
+    const favoriteAccount = accounts.find(a => a.is_favorite);
+    setCardPaymentData({
+      card_id: card?.id || '',
+      account_id: favoriteAccount?.id || '',
+      amount: card?.current_debt?.toString() || '',
+      payment_date: new Date().toISOString().split('T')[0],
+      description: card ? `${card.name} kart ödemesi` : 'Kart ödemesi',
+    });
+    setCardPaymentModalOpen(true);
   }
 
   async function handleSubmit(e) {
@@ -106,7 +161,7 @@ export default function HesaplarPage() {
     } else {
       addToast(editingAccount ? 'Hesap güncellendi' : 'Hesap eklendi', 'success');
       setModalOpen(false);
-      fetchAccounts();
+      fetchData();
     }
   }
 
@@ -122,18 +177,26 @@ export default function HesaplarPage() {
       addToast('Silme işlemi başarısız', 'error');
     } else {
       addToast('Hesap silindi', 'success');
-      fetchAccounts();
+      fetchData();
     }
   }
 
   async function toggleFavorite(account) {
+    // Clear other favorites first
+    if (!account.is_favorite) {
+      await supabase
+        .from('bank_accounts')
+        .update({ is_favorite: false })
+        .neq('id', account.id);
+    }
+
     const { error } = await supabase
       .from('bank_accounts')
       .update({ is_favorite: !account.is_favorite })
       .eq('id', account.id);
 
     if (!error) {
-      fetchAccounts();
+      fetchData();
     }
   }
 
@@ -159,7 +222,7 @@ export default function HesaplarPage() {
       return;
     }
 
-    // Start transaction
+    // Record transfer
     const { error: transferError } = await supabase
       .from('transfers')
       .insert([{
@@ -189,10 +252,129 @@ export default function HesaplarPage() {
     addToast('Transfer başarılı', 'success');
     setTransferModalOpen(false);
     setTransferData({ from_account_id: '', to_account_id: '', amount: '', description: '' });
-    fetchAccounts();
+    fetchData();
+  }
+
+  async function handleTransaction(e) {
+    e.preventDefault();
+
+    const amount = parseFloat(transactionData.amount);
+    if (!amount || amount <= 0) {
+      addToast('Geçerli bir tutar girin', 'error');
+      return;
+    }
+
+    const account = accounts.find(a => a.id === transactionData.account_id);
+    if (!account) {
+      addToast('Hesap seçin', 'error');
+      return;
+    }
+
+    // Check balance for expense
+    if (transactionData.type === 'expense' && account.balance < amount) {
+      addToast('Yetersiz bakiye', 'error');
+      return;
+    }
+
+    // Record transaction
+    const { error: txError } = await supabase
+      .from('transactions')
+      .insert([{
+        account_id: transactionData.account_id,
+        type: transactionData.type,
+        description: transactionData.description,
+        amount: amount,
+        transaction_date: transactionData.transaction_date,
+      }]);
+
+    if (txError) {
+      addToast('İşlem kaydedilemedi: ' + txError.message, 'error');
+      return;
+    }
+
+    // Update account balance
+    const newBalance = transactionData.type === 'income' 
+      ? account.balance + amount 
+      : account.balance - amount;
+
+    await supabase
+      .from('bank_accounts')
+      .update({ balance: newBalance })
+      .eq('id', account.id);
+
+    addToast(transactionData.type === 'income' ? 'Gelir eklendi' : 'Gider eklendi', 'success');
+    setTransactionModalOpen(false);
+    fetchData();
+  }
+
+  async function handleCardPayment(e) {
+    e.preventDefault();
+
+    const amount = parseFloat(cardPaymentData.amount);
+    if (!amount || amount <= 0) {
+      addToast('Geçerli bir tutar girin', 'error');
+      return;
+    }
+
+    const account = accounts.find(a => a.id === cardPaymentData.account_id);
+    const card = cards.find(c => c.id === cardPaymentData.card_id);
+
+    if (!account || !card) {
+      addToast('Hesap ve kart seçin', 'error');
+      return;
+    }
+
+    if (account.balance < amount) {
+      addToast('Yetersiz bakiye', 'error');
+      return;
+    }
+
+    // Record card payment
+    const { error: paymentError } = await supabase
+      .from('card_payments')
+      .insert([{
+        card_id: cardPaymentData.card_id,
+        account_id: cardPaymentData.account_id,
+        amount: amount,
+        payment_date: cardPaymentData.payment_date,
+        description: cardPaymentData.description,
+      }]);
+
+    if (paymentError) {
+      addToast('Ödeme kaydedilemedi: ' + paymentError.message, 'error');
+      return;
+    }
+
+    // Update account balance
+    await supabase
+      .from('bank_accounts')
+      .update({ balance: account.balance - amount })
+      .eq('id', account.id);
+
+    // Mark card transactions as paid (up to the payment amount)
+    const unpaidTx = (card.card_transactions || []).filter(t => !t.is_paid);
+    let remainingAmount = amount;
+    
+    for (const tx of unpaidTx) {
+      if (remainingAmount <= 0) break;
+      
+      const txAmount = tx.installments > 1 ? tx.amount / tx.installments : tx.amount;
+      if (remainingAmount >= txAmount) {
+        await supabase
+          .from('card_transactions')
+          .update({ is_paid: true })
+          .eq('id', tx.id);
+        remainingAmount -= txAmount;
+      }
+    }
+
+    addToast('Kart ödemesi yapıldı', 'success');
+    setCardPaymentModalOpen(false);
+    fetchData();
   }
 
   const totalBalance = accounts.reduce((sum, acc) => sum + (acc.balance || 0), 0);
+  const favoriteAccount = accounts.find(a => a.is_favorite);
 
   return (
     <div className="animate-fadeIn">
@@ -205,6 +387,18 @@ export default function HesaplarPage() {
           <p className="text-secondary">Tüm hesaplarınızı buradan yönetin</p>
         </div>
         <div className="flex gap-md">
+          <button className="btn btn-secondary" onClick={() => openTransactionModal()}>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" width="18" height="18">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            </svg>
+            Gelir/Gider
+          </button>
+          <button className="btn btn-secondary" onClick={() => openCardPaymentModal()}>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" width="18" height="18">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z" />
+            </svg>
+            Kart Öde
+          </button>
           <button className="btn btn-secondary" onClick={() => setTransferModalOpen(true)}>
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" width="18" height="18">
               <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
@@ -225,7 +419,50 @@ export default function HesaplarPage() {
         <div className="stat-label">Toplam Bakiye</div>
         <div className="stat-value" style={{ fontSize: '2.5rem' }}>{formatCurrency(totalBalance)}</div>
         <div className="text-secondary">{accounts.length} hesap</div>
+        {favoriteAccount && (
+          <div className="text-muted" style={{ marginTop: 'var(--spacing-sm)', fontSize: '0.875rem' }}>
+            ★ Favori: {favoriteAccount.name} ({formatCurrency(favoriteAccount.balance)})
+          </div>
+        )}
       </div>
+
+      {/* Credit Cards Summary - Quick Pay */}
+      {cards.length > 0 && (
+        <div className="card mb-xl">
+          <div className="card-header">
+            <h2 className="card-title">Kart Borçları</h2>
+          </div>
+          <div className="grid grid-3" style={{ gap: 'var(--spacing-md)' }}>
+            {cards.filter(c => c.current_debt > 0).map(card => (
+              <div 
+                key={card.id} 
+                style={{ 
+                  padding: 'var(--spacing-md)',
+                  background: 'var(--bg-glass)',
+                  borderRadius: 'var(--border-radius-md)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}
+              >
+                <div>
+                  <div className="font-medium">{card.name}</div>
+                  <div className="text-danger font-bold">{formatCurrency(card.current_debt)}</div>
+                  <div className="text-muted" style={{ fontSize: '0.75rem' }}>
+                    Son ödeme: {formatDate(calculateDueDate(card.statement_day), 'dd MMM')}
+                  </div>
+                </div>
+                <button 
+                  className="btn btn-primary"
+                  onClick={() => openCardPaymentModal(card)}
+                >
+                  Öde
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Accounts Grid */}
       {loading ? (
@@ -262,6 +499,11 @@ export default function HesaplarPage() {
                   {account.is_favorite ? '★' : '☆'}
                 </button>
                 <div className="flex gap-sm">
+                  <button className="btn btn-ghost btn-icon" onClick={() => openTransactionModal(account)} title="Gelir/Gider Ekle">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" width="18" height="18">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                    </svg>
+                  </button>
                   <button className="btn btn-ghost btn-icon" onClick={() => openEditModal(account)}>
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" width="18" height="18">
                       <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
@@ -286,6 +528,48 @@ export default function HesaplarPage() {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Recent Transactions */}
+      {transactions.length > 0 && (
+        <div className="card mt-xl">
+          <div className="card-header">
+            <h2 className="card-title">Son İşlemler</h2>
+          </div>
+          <div className="table-container">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Tarih</th>
+                  <th>Hesap</th>
+                  <th>Açıklama</th>
+                  <th>Tür</th>
+                  <th className="text-right">Tutar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.slice(0, 10).map(tx => {
+                  const account = accounts.find(a => a.id === tx.account_id);
+                  return (
+                    <tr key={tx.id}>
+                      <td>{formatDate(tx.transaction_date, 'dd MMM yyyy')}</td>
+                      <td>{account?.name || '-'}</td>
+                      <td>{tx.description}</td>
+                      <td>
+                        <span className={`badge ${tx.type === 'income' ? 'badge-success' : 'badge-danger'}`}>
+                          {tx.type === 'income' ? 'Gelir' : 'Gider'}
+                        </span>
+                      </td>
+                      <td className={`text-right font-bold ${tx.type === 'income' ? 'text-success' : 'text-danger'}`}>
+                        {tx.type === 'income' ? '+' : '-'}{formatCurrency(tx.amount)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -366,7 +650,7 @@ export default function HesaplarPage() {
                 checked={formData.is_favorite}
                 onChange={(e) => setFormData({ ...formData, is_favorite: e.target.checked })}
               />
-              <span>Favori hesap olarak işaretle</span>
+              <span>Favori hesap olarak işaretle (kart ödemeleri için)</span>
             </label>
           </div>
 
@@ -454,6 +738,194 @@ export default function HesaplarPage() {
             </button>
             <button type="submit" className="btn btn-primary">
               Transfer Yap
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Transaction Modal (Income/Expense) */}
+      <Modal 
+        isOpen={transactionModalOpen} 
+        onClose={() => setTransactionModalOpen(false)}
+        title="Gelir / Gider Ekle"
+      >
+        <form onSubmit={handleTransaction}>
+          <div className="form-group">
+            <label className="form-label">Hesap *</label>
+            <select
+              className="form-select"
+              value={transactionData.account_id}
+              onChange={(e) => setTransactionData({ ...transactionData, account_id: e.target.value })}
+              required
+            >
+              <option value="">Hesap seçin</option>
+              {accounts.map(acc => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name} - {formatCurrency(acc.balance)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">İşlem Türü</label>
+            <div className="flex gap-md">
+              <button
+                type="button"
+                className={`btn ${transactionData.type === 'income' ? 'btn-success' : 'btn-secondary'}`}
+                style={{ flex: 1 }}
+                onClick={() => setTransactionData({ ...transactionData, type: 'income' })}
+              >
+                ↓ Gelir
+              </button>
+              <button
+                type="button"
+                className={`btn ${transactionData.type === 'expense' ? 'btn-danger' : 'btn-secondary'}`}
+                style={{ flex: 1 }}
+                onClick={() => setTransactionData({ ...transactionData, type: 'expense' })}
+              >
+                ↑ Gider
+              </button>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Açıklama *</label>
+            <input
+              type="text"
+              className="form-input"
+              value={transactionData.description}
+              onChange={(e) => setTransactionData({ ...transactionData, description: e.target.value })}
+              placeholder="Örn: Maaş, Market alışverişi"
+              required
+            />
+          </div>
+
+          <div className="grid grid-2">
+            <div className="form-group">
+              <label className="form-label">Tutar *</label>
+              <input
+                type="number"
+                step="0.01"
+                className="form-input"
+                value={transactionData.amount}
+                onChange={(e) => setTransactionData({ ...transactionData, amount: e.target.value })}
+                placeholder="0.00"
+                required
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Tarih</label>
+              <input
+                type="date"
+                className="form-input"
+                value={transactionData.transaction_date}
+                onChange={(e) => setTransactionData({ ...transactionData, transaction_date: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="modal-footer" style={{ padding: 0, marginTop: 'var(--spacing-lg)', borderTop: 'none' }}>
+            <button type="button" className="btn btn-secondary" onClick={() => setTransactionModalOpen(false)}>
+              İptal
+            </button>
+            <button type="submit" className={`btn ${transactionData.type === 'income' ? 'btn-success' : 'btn-danger'}`}>
+              {transactionData.type === 'income' ? 'Gelir Ekle' : 'Gider Ekle'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Card Payment Modal */}
+      <Modal 
+        isOpen={cardPaymentModalOpen} 
+        onClose={() => setCardPaymentModalOpen(false)}
+        title="Kredi Kartı Ödemesi"
+      >
+        <form onSubmit={handleCardPayment}>
+          <div className="form-group">
+            <label className="form-label">Kredi Kartı *</label>
+            <select
+              className="form-select"
+              value={cardPaymentData.card_id}
+              onChange={(e) => {
+                const card = cards.find(c => c.id === e.target.value);
+                setCardPaymentData({ 
+                  ...cardPaymentData, 
+                  card_id: e.target.value,
+                  amount: card?.current_debt?.toString() || '',
+                  description: card ? `${card.name} kart ödemesi` : 'Kart ödemesi'
+                });
+              }}
+              required
+            >
+              <option value="">Kart seçin</option>
+              {cards.map(card => (
+                <option key={card.id} value={card.id}>
+                  {card.name} - Borç: {formatCurrency(card.current_debt)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Ödeme Yapılacak Hesap *</label>
+            <select
+              className="form-select"
+              value={cardPaymentData.account_id}
+              onChange={(e) => setCardPaymentData({ ...cardPaymentData, account_id: e.target.value })}
+              required
+            >
+              <option value="">Hesap seçin</option>
+              {accounts.map(acc => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.is_favorite ? '★ ' : ''}{acc.name} - {formatCurrency(acc.balance)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-2">
+            <div className="form-group">
+              <label className="form-label">Ödeme Tutarı *</label>
+              <input
+                type="number"
+                step="0.01"
+                className="form-input"
+                value={cardPaymentData.amount}
+                onChange={(e) => setCardPaymentData({ ...cardPaymentData, amount: e.target.value })}
+                placeholder="0.00"
+                required
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Ödeme Tarihi</label>
+              <input
+                type="date"
+                className="form-input"
+                value={cardPaymentData.payment_date}
+                onChange={(e) => setCardPaymentData({ ...cardPaymentData, payment_date: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Açıklama</label>
+            <input
+              type="text"
+              className="form-input"
+              value={cardPaymentData.description}
+              onChange={(e) => setCardPaymentData({ ...cardPaymentData, description: e.target.value })}
+              placeholder="Kart ödemesi açıklaması"
+            />
+          </div>
+
+          <div className="modal-footer" style={{ padding: 0, marginTop: 'var(--spacing-lg)', borderTop: 'none' }}>
+            <button type="button" className="btn btn-secondary" onClick={() => setCardPaymentModalOpen(false)}>
+              İptal
+            </button>
+            <button type="submit" className="btn btn-primary">
+              Ödeme Yap
             </button>
           </div>
         </form>

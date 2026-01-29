@@ -79,6 +79,17 @@ CREATE TABLE IF NOT EXISTS transfers (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Kart Ödemeleri Tablosu
+CREATE TABLE IF NOT EXISTS card_payments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    card_id UUID NOT NULL REFERENCES credit_cards(id) ON DELETE CASCADE,
+    account_id UUID NOT NULL REFERENCES bank_accounts(id) ON DELETE CASCADE,
+    amount DECIMAL(15,2) NOT NULL,
+    payment_date DATE NOT NULL,
+    description VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Planlı Ödemeler Tablosu
 CREATE TABLE IF NOT EXISTS scheduled_payments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
