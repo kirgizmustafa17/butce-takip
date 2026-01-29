@@ -121,14 +121,6 @@ export default function Sidebar({ isOpen, onClose }) {
           <p>by Mustafa</p>
         </div>
       </aside>
-
-      <style jsx>{`
-        @media (max-width: 1024px) {
-          .sidebar-overlay {
-            display: block !important;
-          }
-        }
-      `}</style>
     </>
   );
 }
