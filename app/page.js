@@ -14,6 +14,7 @@ export default function Dashboard() {
   const [scheduledPayments, setScheduledPayments] = useState([]);
   const [prices, setPrices] = useState({});
   const [cashFlow, setCashFlow] = useState([]);
+  const [debtors, setDebtors] = useState([]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -23,11 +24,12 @@ export default function Dashboard() {
     setLoading(true);
     try {
       // Fetch all data in parallel
-      const [accountsRes, cardsRes, investmentsRes, paymentsRes] = await Promise.all([
+      const [accountsRes, cardsRes, investmentsRes, paymentsRes, debtorsRes] = await Promise.all([
         supabase.from('bank_accounts').select('*').order('is_favorite', { ascending: false }),
         supabase.from('credit_cards').select('*, card_transactions(*)'),
         supabase.from('investments').select('*'),
         supabase.from('scheduled_payments').select('*').eq('is_completed', false).order('payment_date'),
+        supabase.from('debtors').select('remaining_amount'),
       ]);
 
       const accountsData = accountsRes.data || [];
@@ -39,6 +41,7 @@ export default function Dashboard() {
       setCards(cardsData);
       setInvestments(investmentsData);
       setScheduledPayments(paymentsData);
+      setDebtors(debtorsRes.data || []);
 
       // Fetch investment prices
       const investmentTypes = [...new Set(investmentsData.map(inv => inv.type))];
@@ -155,6 +158,9 @@ export default function Dashboard() {
 
   const investmentProfitLoss = totalInvestmentValue - totalInvestmentCost;
   const netWorth = totalCash + totalInvestmentValue - totalDebt;
+  
+  // Calculate total receivables (NOT included in netWorth as requested)
+  const totalReceivable = debtors.reduce((sum, d) => sum + (d.remaining_amount || 0), 0);
 
   // Get upcoming payments (next 7 days)
   const upcomingPayments = cashFlow.slice(0, 7).filter(day => day.events.length > 0);
@@ -206,6 +212,16 @@ export default function Dashboard() {
             Varlıklar - Borçlar
           </div>
         </div>
+
+        {totalReceivable > 0 && (
+          <Link href="/alacaklar" className="stat-card" style={{ textDecoration: 'none' }}>
+            <div className="stat-label">Toplam Alacak</div>
+            <div className="stat-value" style={{ color: 'var(--accent-warning)' }}>{formatCurrency(totalReceivable)}</div>
+            <div className="text-secondary" style={{ fontSize: '0.875rem' }}>
+              {debtors.length} kişiden
+            </div>
+          </Link>
+        )}
       </div>
 
       {/* Main Content Grid */}
