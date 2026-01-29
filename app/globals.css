@@ -441,6 +441,8 @@ select {
   height: 40px;
   padding: 0;
   border-radius: var(--border-radius-md);
+  position: relative;
+  z-index: 10;
 }
 
 .btn-lg {
