@@ -16,6 +16,7 @@ export default function YatirimlarPage() {
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [transactionModalOpen, setTransactionModalOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState(null);
+  const [editingTransaction, setEditingTransaction] = useState(null);
   const [selectedAccount, setSelectedAccount] = useState(null);
   const { addToast } = useToast();
 
@@ -100,7 +101,72 @@ export default function YatirimlarPage() {
       transaction_date: new Date().toISOString().split('T')[0],
       notes: '',
     });
+    setEditingTransaction(null);
     setTransactionModalOpen(true);
+  }
+
+  function openEditTransactionModal(tx) {
+    setTxFormData({
+      account_id: tx.account_id,
+      type: tx.type,
+      quantity: tx.quantity.toString(),
+      price_per_unit: tx.price_per_unit.toString(),
+      transaction_date: tx.transaction_date,
+      notes: tx.notes || '',
+    });
+    setEditingTransaction(tx);
+    setTransactionModalOpen(true);
+  }
+
+  async function handleDeleteTransaction(tx) {
+    if (!confirm('Bu işlemi silmek istediğinizden emin misiniz? Hesap bakiyesi güncellenecek.')) return;
+
+    const account = accounts.find(a => a.id === tx.account_id);
+    if (!account) {
+      addToast('Hesap bulunamadı', 'error');
+      return;
+    }
+
+    // Reverse the transaction effect on account
+    let newQuantity, newAverageCost;
+
+    if (tx.type === 'buy') {
+      // Undo buy: subtract quantity and recalculate average cost
+      newQuantity = account.quantity - tx.quantity;
+      if (newQuantity <= 0) {
+        newQuantity = 0;
+        newAverageCost = 0;
+      } else {
+        // Recalculate: (current_total_cost - tx_amount) / new_quantity
+        const currentTotalCost = account.quantity * (account.average_cost || 0);
+        const newTotalCost = currentTotalCost - tx.total_amount;
+        newAverageCost = newTotalCost > 0 ? newTotalCost / newQuantity : account.average_cost;
+      }
+    } else {
+      // Undo sell: add quantity back
+      newQuantity = account.quantity + tx.quantity;
+      newAverageCost = account.average_cost || 0;
+    }
+
+    // Delete transaction
+    const { error: deleteError } = await supabase
+      .from('investment_transactions')
+      .delete()
+      .eq('id', tx.id);
+
+    if (deleteError) {
+      addToast('İşlem silinemedi: ' + deleteError.message, 'error');
+      return;
+    }
+
+    // Update account
+    await supabase
+      .from('investment_accounts')
+      .update({ quantity: newQuantity, average_cost: newAverageCost })
+      .eq('id', account.id);
+
+    addToast('İşlem silindi ve bakiye güncellendi', 'success');
+    fetchData();
   }
 
   async function handleAccountSubmit(e) {
@@ -173,47 +239,79 @@ export default function YatirimlarPage() {
       return;
     }
 
-    // Check for sell: do we have enough?
-    if (txFormData.type === 'sell' && quantity > account.quantity) {
-      addToast('Yetersiz miktar! Mevcut: ' + account.quantity, 'error');
-      return;
-    }
-
     const totalAmount = quantity * pricePerUnit;
 
-    // Insert transaction
-    const { error: txError } = await supabase
-      .from('investment_transactions')
-      .insert([{
-        account_id: txFormData.account_id,
-        type: txFormData.type,
-        quantity: quantity,
-        price_per_unit: pricePerUnit,
-        total_amount: totalAmount,
-        transaction_date: txFormData.transaction_date,
-        notes: txFormData.notes || null,
-      }]);
+    // If editing, first reverse the old transaction
+    let workingQuantity = account.quantity;
+    let workingTotalCost = account.quantity * (account.average_cost || 0);
 
-    if (txError) {
-      addToast('İşlem kaydedilemedi: ' + txError.message, 'error');
+    if (editingTransaction) {
+      const oldTx = editingTransaction;
+      if (oldTx.type === 'buy') {
+        workingQuantity -= oldTx.quantity;
+        workingTotalCost -= oldTx.total_amount;
+      } else {
+        workingQuantity += oldTx.quantity;
+      }
+    }
+
+    // Check for sell: do we have enough after reversal?
+    if (txFormData.type === 'sell' && quantity > workingQuantity) {
+      addToast('Yetersiz miktar! Mevcut: ' + workingQuantity.toFixed(4), 'error');
       return;
     }
 
-    // Update account quantity and average cost
+    // Apply new transaction
     let newQuantity, newAverageCost;
 
     if (txFormData.type === 'buy') {
-      // For buy: calculate new weighted average cost
-      const oldTotalCost = account.quantity * (account.average_cost || 0);
-      const newTotalCost = oldTotalCost + totalAmount;
-      newQuantity = account.quantity + quantity;
+      const newTotalCost = workingTotalCost + totalAmount;
+      newQuantity = workingQuantity + quantity;
       newAverageCost = newQuantity > 0 ? newTotalCost / newQuantity : 0;
     } else {
-      // For sell: reduce quantity, keep average cost same
-      newQuantity = account.quantity - quantity;
-      newAverageCost = account.average_cost || 0;
+      newQuantity = workingQuantity - quantity;
+      newAverageCost = workingTotalCost > 0 && workingQuantity > 0 ? workingTotalCost / workingQuantity : account.average_cost || 0;
     }
 
+    let error;
+
+    if (editingTransaction) {
+      // Update existing transaction
+      const result = await supabase
+        .from('investment_transactions')
+        .update({
+          account_id: txFormData.account_id,
+          type: txFormData.type,
+          quantity: quantity,
+          price_per_unit: pricePerUnit,
+          total_amount: totalAmount,
+          transaction_date: txFormData.transaction_date,
+          notes: txFormData.notes || null,
+        })
+        .eq('id', editingTransaction.id);
+      error = result.error;
+    } else {
+      // Insert new transaction
+      const result = await supabase
+        .from('investment_transactions')
+        .insert([{
+          account_id: txFormData.account_id,
+          type: txFormData.type,
+          quantity: quantity,
+          price_per_unit: pricePerUnit,
+          total_amount: totalAmount,
+          transaction_date: txFormData.transaction_date,
+          notes: txFormData.notes || null,
+        }]);
+      error = result.error;
+    }
+
+    if (error) {
+      addToast('İşlem kaydedilemedi: ' + error.message, 'error');
+      return;
+    }
+
+    // Update account
     await supabase
       .from('investment_accounts')
       .update({ 
@@ -222,8 +320,9 @@ export default function YatirimlarPage() {
       })
       .eq('id', account.id);
 
-    addToast(txFormData.type === 'buy' ? 'Alım kaydedildi' : 'Satış kaydedildi', 'success');
+    addToast(editingTransaction ? 'İşlem güncellendi' : (txFormData.type === 'buy' ? 'Alım kaydedildi' : 'Satış kaydedildi'), 'success');
     setTransactionModalOpen(false);
+    setEditingTransaction(null);
     fetchData();
   }
 
@@ -499,6 +598,7 @@ export default function YatirimlarPage() {
                   <th className="text-right">Miktar</th>
                   <th className="text-right">Birim Fiyat</th>
                   <th className="text-right">Toplam</th>
+                  <th className="text-right">İşlem</th>
                 </tr>
               </thead>
               <tbody>
@@ -518,6 +618,28 @@ export default function YatirimlarPage() {
                       <td className="text-right">{formatCurrency(tx.price_per_unit)}</td>
                       <td className={`text-right font-bold ${tx.type === 'buy' ? 'text-danger' : 'text-success'}`}>
                         {tx.type === 'buy' ? '-' : '+'}{formatCurrency(tx.total_amount)}
+                      </td>
+                      <td className="text-right">
+                        <div className="flex gap-sm justify-end">
+                          <button 
+                            className="btn btn-ghost btn-icon" 
+                            onClick={() => openEditTransactionModal(tx)}
+                            title="Düzenle"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" width="16" height="16">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
+                            </svg>
+                          </button>
+                          <button 
+                            className="btn btn-ghost btn-icon text-danger" 
+                            onClick={() => handleDeleteTransaction(tx)}
+                            title="Sil"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" width="16" height="16">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                            </svg>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -611,8 +733,8 @@ export default function YatirimlarPage() {
       {/* Transaction Modal (Buy/Sell) */}
       <Modal 
         isOpen={transactionModalOpen} 
-        onClose={() => setTransactionModalOpen(false)}
-        title="Alım / Satım İşlemi"
+        onClose={() => { setTransactionModalOpen(false); setEditingTransaction(null); }}
+        title={editingTransaction ? 'İşlem Düzenle' : 'Alım / Satım İşlemi'}
       >
         <form onSubmit={handleTransactionSubmit}>
           <div className="form-group">
