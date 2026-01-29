@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { formatCurrency, formatDate, calculateDueDate, calculateNextStatementDate, calculateInstallmentDetails } from '@/lib/utils';
+import { formatCurrency, formatDate, calculateDueDate, calculateNextStatementDate, calculateStatementDateForTransaction, calculateInstallmentDetails } from '@/lib/utils';
 import { useToast } from '@/components/ui/Toast';
 import Modal from '@/components/ui/Modal';
 
@@ -219,6 +219,25 @@ export default function KartlarPage() {
     return periodDebt;
   }
 
+  // Calculate statement date based on earliest unpaid transaction
+  function getCardStatementDate(card) {
+    const unpaidTransactions = (card.card_transactions || []).filter(t => !t.is_paid);
+    
+    if (unpaidTransactions.length === 0) {
+      // No unpaid transactions, use default calculation
+      return calculateNextStatementDate(card.statement_day);
+    }
+    
+    // Find earliest transaction date
+    const earliestTx = unpaidTransactions.reduce((earliest, t) => {
+      const txDate = new Date(t.transaction_date);
+      return txDate < earliest ? txDate : earliest;
+    }, new Date(unpaidTransactions[0].transaction_date));
+    
+    // Calculate statement date for that transaction
+    return calculateStatementDateForTransaction(card.statement_day, earliestTx);
+  }
+
   const totalDebt = cards.reduce((sum, card) => sum + (card.used_limit || 0), 0);
   const totalLimit = cards.reduce((sum, card) => sum + card.total_limit, 0);
 
@@ -289,8 +308,11 @@ export default function KartlarPage() {
         <div className="grid grid-2">
           {cards.map((card) => {
             const usagePercent = ((card.used_limit || 0) / card.total_limit) * 100;
-            const dueDate = calculateDueDate(card.statement_day);
-            const statementDate = calculateNextStatementDate(card.statement_day);
+            // Calculate statement date based on earliest unpaid transaction
+            const statementDate = getCardStatementDate(card);
+            // Calculate due date: statement date + 10 days
+            const dueDate = new Date(statementDate);
+            dueDate.setDate(dueDate.getDate() + 10);
             const periodDebt = calculatePeriodDebt(card);
 
             return (
