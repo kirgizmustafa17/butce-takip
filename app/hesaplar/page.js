@@ -292,15 +292,22 @@ export default function HesaplarPage() {
       return;
     }
 
-    // Update account balance
-    const newBalance = transactionData.type === 'income' 
-      ? account.balance + amount 
-      : account.balance - amount;
+    // Only update account balance if transaction date is today or in the past
+    const transactionDateObj = new Date(transactionData.transaction_date);
+    const todayDate = new Date();
+    todayDate.setHours(0, 0, 0, 0);
+    transactionDateObj.setHours(0, 0, 0, 0);
+    
+    if (transactionDateObj <= todayDate) {
+      const newBalance = transactionData.type === 'income' 
+        ? account.balance + amount 
+        : account.balance - amount;
 
-    await supabase
-      .from('bank_accounts')
-      .update({ balance: newBalance })
-      .eq('id', account.id);
+      await supabase
+        .from('bank_accounts')
+        .update({ balance: newBalance })
+        .eq('id', account.id);
+    }
 
     addToast(transactionData.type === 'income' ? 'Gelir eklendi' : 'Gider eklendi', 'success');
     setTransactionModalOpen(false);

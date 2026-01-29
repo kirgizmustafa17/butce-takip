@@ -78,6 +78,15 @@ export default function Dashboard() {
         };
       }).filter(p => p.amount > 0);
 
+      // Fetch future transactions for cash flow
+      const todayStr = new Date().toISOString().split('T')[0];
+      const futureTransactionsRes = await supabase
+        .from('transactions')
+        .select('*')
+        .gte('transaction_date', todayStr)
+        .order('transaction_date');
+      const futureTransactionsData = futureTransactionsRes.data || [];
+
       // Generate cash flow projection
       const totalBalance = accountsData.reduce((sum, acc) => sum + (acc.balance || 0), 0);
       
@@ -94,9 +103,22 @@ export default function Dashboard() {
           type: p.payment_type
         }));
       
+      // Map future transactions from transactions table
+      const mappedFutureTransactions = futureTransactionsData
+        .filter(t => new Date(t.transaction_date) > today) // Only include strictly future transactions
+        .map(t => ({
+          date: t.transaction_date,
+          description: t.description,
+          amount: t.amount,
+          type: t.type
+        }));
+      
+      // Combine all payments for projection
+      const allScheduledPayments = [...mappedPayments, ...mappedFutureTransactions];
+      
       const projection = generateCashFlowProjection(
         totalBalance,
-        mappedPayments,
+        allScheduledPayments,
         cardPayments
       );
       setCashFlow(projection);

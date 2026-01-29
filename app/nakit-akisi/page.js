@@ -21,16 +21,21 @@ export default function NakitAkisiPage() {
   async function fetchData() {
     setLoading(true);
     try {
-      const [accountsRes, cardsRes, paymentsRes] = await Promise.all([
+      // Fetch future transactions from transactions table
+      const todayStr = new Date().toISOString().split('T')[0];
+      const [accountsRes, cardsRes, paymentsRes, futureTransactionsRes] = await Promise.all([
         supabase.from('bank_accounts').select('*'),
         supabase.from('credit_cards').select('*, card_transactions(*)'),
         // Get all payments, not just incomplete ones - we'll filter by date in projection
         supabase.from('scheduled_payments').select('*').order('payment_date'),
+        // Get future transactions from transactions table
+        supabase.from('transactions').select('*').gte('transaction_date', todayStr).order('transaction_date'),
       ]);
 
       const accountsData = accountsRes.data || [];
       const cardsData = cardsRes.data || [];
       const paymentsData = paymentsRes.data || [];
+      const futureTransactionsData = futureTransactionsRes.data || [];
 
       setAccounts(accountsData);
       setCards(cardsData);
@@ -90,9 +95,22 @@ export default function NakitAkisiPage() {
           type: p.payment_type
         }));
       
+      // Map future transactions from transactions table
+      const mappedFutureTransactions = futureTransactionsData
+        .filter(t => new Date(t.transaction_date) > today) // Only include strictly future transactions
+        .map(t => ({
+          date: t.transaction_date,
+          description: t.description,
+          amount: t.amount,
+          type: t.type
+        }));
+      
+      // Combine all payments for projection
+      const allScheduledPayments = [...mappedPayments, ...mappedFutureTransactions];
+      
       const projection = generateCashFlowProjection(
         totalBalance,
-        mappedPayments,
+        allScheduledPayments,
         cardPayments
       );
       setCashFlow(projection);
