@@ -111,8 +111,9 @@ export default function HesaplarPage() {
   }
 
   function openTransactionModal(account = null) {
+    const favoriteAccount = accounts.find(a => a.is_favorite);
     setTransactionData({
-      account_id: account?.id || '',
+      account_id: account?.id || favoriteAccount?.id || '',
       type: 'expense',
       description: '',
       amount: '',
