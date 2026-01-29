@@ -66,14 +66,23 @@ export default function Dashboard() {
 
       // Generate cash flow projection
       const totalBalance = accountsData.reduce((sum, acc) => sum + (acc.balance || 0), 0);
-      const projection = generateCashFlowProjection(
-        totalBalance,
-        paymentsData.map(p => ({
+      
+      // Filter to include only future pending payments
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const mappedPayments = paymentsData
+        .filter(p => !p.is_completed && new Date(p.payment_date) >= today)
+        .map(p => ({
           date: p.payment_date,
           description: p.description,
           amount: p.amount,
           type: p.payment_type
-        })),
+        }));
+      
+      const projection = generateCashFlowProjection(
+        totalBalance,
+        mappedPayments,
         cardPayments
       );
       setCashFlow(projection);
@@ -87,7 +96,13 @@ export default function Dashboard() {
 
   // Calculate totals
   const totalCash = accounts.reduce((sum, acc) => sum + (acc.balance || 0), 0);
-  const totalDebt = cards.reduce((sum, card) => sum + (card.used_limit || 0), 0);
+  
+  // Calculate total debt from unpaid card transactions (dynamic calculation)
+  const totalDebt = cards.reduce((sum, card) => {
+    const unpaidTransactions = (card.card_transactions || []).filter(t => !t.is_paid);
+    const cardDebt = unpaidTransactions.reduce((txSum, t) => txSum + t.amount, 0);
+    return sum + cardDebt;
+  }, 0);
   
   // Calculate total investment value
   const totalInvestmentValue = investments.reduce((sum, inv) => {

@@ -24,7 +24,8 @@ export default function NakitAkisiPage() {
       const [accountsRes, cardsRes, paymentsRes] = await Promise.all([
         supabase.from('bank_accounts').select('*'),
         supabase.from('credit_cards').select('*, card_transactions(*)'),
-        supabase.from('scheduled_payments').select('*').eq('is_completed', false).order('payment_date'),
+        // Get all payments, not just incomplete ones - we'll filter by date in projection
+        supabase.from('scheduled_payments').select('*').order('payment_date'),
       ]);
 
       const accountsData = accountsRes.data || [];
@@ -54,14 +55,30 @@ export default function NakitAkisiPage() {
 
       // Generate projection
       const totalBalance = accountsData.reduce((sum, acc) => sum + (acc.balance || 0), 0);
-      const projection = generateCashFlowProjection(
-        totalBalance,
-        paymentsData.map(p => ({
+      
+      // Map payments: completed payments used their updated_at date, pending ones use payment_date
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const mappedPayments = paymentsData
+        .filter(p => {
+          // Include all pending payments scheduled for the future
+          if (!p.is_completed) {
+            return new Date(p.payment_date) >= today;
+          }
+          // Include completed payments only if completed today (for immediate feedback)
+          return false;
+        })
+        .map(p => ({
           date: p.payment_date,
           description: p.description,
           amount: p.amount,
           type: p.payment_type
-        })),
+        }));
+      
+      const projection = generateCashFlowProjection(
+        totalBalance,
+        mappedPayments,
         cardPayments
       );
       setCashFlow(projection);
