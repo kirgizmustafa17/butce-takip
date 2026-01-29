@@ -383,6 +383,21 @@ export default function YatirimlarPage() {
 
   return (
     <div className="animate-fadeIn">
+      {/* Current Prices - Horizontal Bar */}
+      <div className="card mb-xl" style={{ padding: 'var(--spacing-sm) var(--spacing-md)', display: 'flex', alignItems: 'center', gap: 'var(--spacing-lg)', overflowX: 'auto' }}>
+        <div className="text-secondary font-bold whitespace-nowrap" style={{ fontSize: '0.875rem' }}>🔥 Güncel Fiyatlar:</div>
+        <div className="flex gap-lg items-center" style={{ minWidth: 'max-content' }}>
+          {Object.entries(INVESTMENT_TYPES).map(([code, info]) => (
+            <div key={code} className="flex items-center gap-xs">
+              <span className="text-secondary" style={{ fontSize: '0.75rem' }}>{info.name}:</span>
+              <span className="font-bold" style={{ fontSize: '0.875rem' }}>
+                {prices[code] ? formatCurrency(prices[code]) : '...'}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Header */}
       <div className="flex justify-between items-center mb-xl">
         <div>
@@ -435,31 +450,7 @@ export default function YatirimlarPage() {
         </div>
       </div>
 
-      {/* Current Prices */}
-      <div className="card mb-xl">
-        <div className="card-header">
-          <h2 className="card-title">Güncel Fiyatlar</h2>
-        </div>
-        <div className="grid grid-5" style={{ padding: 0, gap: 'var(--spacing-sm)' }}>
-          {Object.entries(INVESTMENT_TYPES).map(([code, info]) => (
-            <div 
-              key={code} 
-              style={{ 
-                padding: 'var(--spacing-md)',
-                background: 'var(--bg-glass)',
-                borderRadius: 'var(--border-radius-md)',
-                textAlign: 'center'
-              }}
-            >
-              <div className="text-secondary" style={{ fontSize: '0.75rem' }}>{info.name}</div>
-              <div className="font-bold" style={{ fontSize: '1.125rem', marginTop: 'var(--spacing-xs)' }}>
-                {prices[code] ? formatCurrency(prices[code]) : '...'}
-              </div>
-              <div className="text-muted" style={{ fontSize: '0.7rem' }}>/ {info.unit}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+
 
       {/* Accounts */}
       {loading ? (
