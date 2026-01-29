@@ -8,42 +8,50 @@ import { useToast } from '@/components/ui/Toast';
 import Modal from '@/components/ui/Modal';
 
 export default function YatirimlarPage() {
-  const [investments, setInvestments] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [transactions, setTransactions] = useState([]);
   const [prices, setPrices] = useState({});
   const [loading, setLoading] = useState(true);
   const [pricesLoading, setPricesLoading] = useState(true);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingInvestment, setEditingInvestment] = useState(null);
+  const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const [transactionModalOpen, setTransactionModalOpen] = useState(false);
+  const [editingAccount, setEditingAccount] = useState(null);
+  const [selectedAccount, setSelectedAccount] = useState(null);
   const { addToast } = useToast();
 
-  // Form state
-  const [formData, setFormData] = useState({
-    type: 'XAU',
+  // Account form state
+  const [accountFormData, setAccountFormData] = useState({
     name: '',
+    type: 'XAU',
+    bank_name: '',
+    location: '',
+    is_physical: false,
+  });
+
+  // Transaction form state
+  const [txFormData, setTxFormData] = useState({
+    account_id: '',
+    type: 'buy',
     quantity: '',
-    purchase_price: '',
-    purchase_date: new Date().toISOString().split('T')[0],
+    price_per_unit: '',
+    transaction_date: new Date().toISOString().split('T')[0],
     notes: '',
   });
 
   useEffect(() => {
-    fetchInvestments();
+    fetchData();
     fetchPrices();
   }, []);
 
-  async function fetchInvestments() {
+  async function fetchData() {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('investments')
-      .select('*')
-      .order('type')
-      .order('created_at', { ascending: false });
+    const [accountsRes, txRes] = await Promise.all([
+      supabase.from('investment_accounts').select('*').order('type').order('name'),
+      supabase.from('investment_transactions').select('*').order('transaction_date', { ascending: false }).limit(50),
+    ]);
 
-    if (error) {
-      addToast('Yatırımlar yüklenirken hata oluştu', 'error');
-    } else {
-      setInvestments(data || []);
-    }
+    if (!accountsRes.error) setAccounts(accountsRes.data || []);
+    if (!txRes.error) setTransactions(txRes.data || []);
     setLoading(false);
   }
 
@@ -59,88 +67,170 @@ export default function YatirimlarPage() {
     setPricesLoading(false);
   }
 
-  function openAddModal() {
-    setEditingInvestment(null);
-    setFormData({
-      type: 'XAU',
+  function openAddAccountModal() {
+    setEditingAccount(null);
+    setAccountFormData({
       name: '',
+      type: 'XAU',
+      bank_name: '',
+      location: '',
+      is_physical: false,
+    });
+    setAccountModalOpen(true);
+  }
+
+  function openEditAccountModal(account) {
+    setEditingAccount(account);
+    setAccountFormData({
+      name: account.name,
+      type: account.type,
+      bank_name: account.bank_name || '',
+      location: account.location || '',
+      is_physical: account.is_physical,
+    });
+    setAccountModalOpen(true);
+  }
+
+  function openTransactionModal(account = null) {
+    setTxFormData({
+      account_id: account?.id || '',
+      type: 'buy',
       quantity: '',
-      purchase_price: '',
-      purchase_date: new Date().toISOString().split('T')[0],
+      price_per_unit: prices[account?.type] || '',
+      transaction_date: new Date().toISOString().split('T')[0],
       notes: '',
     });
-    setModalOpen(true);
+    setTransactionModalOpen(true);
   }
 
-  function openEditModal(investment) {
-    setEditingInvestment(investment);
-    setFormData({
-      type: investment.type,
-      name: investment.name,
-      quantity: investment.quantity.toString(),
-      purchase_price: investment.purchase_price.toString(),
-      purchase_date: investment.purchase_date,
-      notes: investment.notes || '',
-    });
-    setModalOpen(true);
-  }
-
-  async function handleSubmit(e) {
+  async function handleAccountSubmit(e) {
     e.preventDefault();
 
-    const investmentData = {
-      type: formData.type,
-      name: formData.name,
-      quantity: parseFloat(formData.quantity) || 0,
-      purchase_price: parseFloat(formData.purchase_price) || 0,
-      purchase_date: formData.purchase_date,
-      notes: formData.notes,
+    const accountData = {
+      name: accountFormData.name,
+      type: accountFormData.type,
+      bank_name: accountFormData.bank_name || null,
+      location: accountFormData.location || null,
+      is_physical: accountFormData.is_physical,
     };
 
     let error;
 
-    if (editingInvestment) {
+    if (editingAccount) {
       const result = await supabase
-        .from('investments')
-        .update(investmentData)
-        .eq('id', editingInvestment.id);
+        .from('investment_accounts')
+        .update(accountData)
+        .eq('id', editingAccount.id);
       error = result.error;
     } else {
+      accountData.quantity = 0;
+      accountData.average_cost = 0;
       const result = await supabase
-        .from('investments')
-        .insert([investmentData]);
+        .from('investment_accounts')
+        .insert([accountData]);
       error = result.error;
     }
 
     if (error) {
       addToast('İşlem başarısız: ' + error.message, 'error');
     } else {
-      addToast(editingInvestment ? 'Yatırım güncellendi' : 'Yatırım eklendi', 'success');
-      setModalOpen(false);
-      fetchInvestments();
+      addToast(editingAccount ? 'Hesap güncellendi' : 'Hesap eklendi', 'success');
+      setAccountModalOpen(false);
+      fetchData();
     }
   }
 
-  async function handleDelete(id) {
-    if (!confirm('Bu yatırımı silmek istediğinizden emin misiniz?')) return;
+  async function handleDeleteAccount(id) {
+    if (!confirm('Bu yatırım hesabını ve tüm işlemlerini silmek istediğinizden emin misiniz?')) return;
 
     const { error } = await supabase
-      .from('investments')
+      .from('investment_accounts')
       .delete()
       .eq('id', id);
 
     if (error) {
       addToast('Silme işlemi başarısız', 'error');
     } else {
-      addToast('Yatırım silindi', 'success');
-      fetchInvestments();
+      addToast('Hesap silindi', 'success');
+      fetchData();
     }
   }
 
-  // Group investments by type
-  const groupedInvestments = investments.reduce((acc, inv) => {
-    if (!acc[inv.type]) acc[inv.type] = [];
-    acc[inv.type].push(inv);
+  async function handleTransactionSubmit(e) {
+    e.preventDefault();
+
+    const quantity = parseFloat(txFormData.quantity);
+    const pricePerUnit = parseFloat(txFormData.price_per_unit);
+    
+    if (!quantity || quantity <= 0 || !pricePerUnit || pricePerUnit <= 0) {
+      addToast('Geçerli miktar ve fiyat girin', 'error');
+      return;
+    }
+
+    const account = accounts.find(a => a.id === txFormData.account_id);
+    if (!account) {
+      addToast('Hesap seçin', 'error');
+      return;
+    }
+
+    // Check for sell: do we have enough?
+    if (txFormData.type === 'sell' && quantity > account.quantity) {
+      addToast('Yetersiz miktar! Mevcut: ' + account.quantity, 'error');
+      return;
+    }
+
+    const totalAmount = quantity * pricePerUnit;
+
+    // Insert transaction
+    const { error: txError } = await supabase
+      .from('investment_transactions')
+      .insert([{
+        account_id: txFormData.account_id,
+        type: txFormData.type,
+        quantity: quantity,
+        price_per_unit: pricePerUnit,
+        total_amount: totalAmount,
+        transaction_date: txFormData.transaction_date,
+        notes: txFormData.notes || null,
+      }]);
+
+    if (txError) {
+      addToast('İşlem kaydedilemedi: ' + txError.message, 'error');
+      return;
+    }
+
+    // Update account quantity and average cost
+    let newQuantity, newAverageCost;
+
+    if (txFormData.type === 'buy') {
+      // For buy: calculate new weighted average cost
+      const oldTotalCost = account.quantity * (account.average_cost || 0);
+      const newTotalCost = oldTotalCost + totalAmount;
+      newQuantity = account.quantity + quantity;
+      newAverageCost = newQuantity > 0 ? newTotalCost / newQuantity : 0;
+    } else {
+      // For sell: reduce quantity, keep average cost same
+      newQuantity = account.quantity - quantity;
+      newAverageCost = account.average_cost || 0;
+    }
+
+    await supabase
+      .from('investment_accounts')
+      .update({ 
+        quantity: newQuantity,
+        average_cost: newAverageCost
+      })
+      .eq('id', account.id);
+
+    addToast(txFormData.type === 'buy' ? 'Alım kaydedildi' : 'Satış kaydedildi', 'success');
+    setTransactionModalOpen(false);
+    fetchData();
+  }
+
+  // Group accounts by type
+  const groupedAccounts = accounts.reduce((acc, account) => {
+    if (!acc[account.type]) acc[account.type] = [];
+    acc[account.type].push(account);
     return acc;
   }, {});
 
@@ -148,10 +238,10 @@ export default function YatirimlarPage() {
   let totalCost = 0;
   let totalValue = 0;
 
-  investments.forEach(inv => {
-    const currentPrice = prices[inv.type] || inv.purchase_price;
-    totalCost += inv.quantity * inv.purchase_price;
-    totalValue += inv.quantity * currentPrice;
+  accounts.forEach(acc => {
+    const currentPrice = prices[acc.type] || acc.average_cost;
+    totalCost += acc.quantity * (acc.average_cost || 0);
+    totalValue += acc.quantity * currentPrice;
   });
 
   const totalProfitLoss = totalValue - totalCost;
@@ -163,9 +253,9 @@ export default function YatirimlarPage() {
       <div className="flex justify-between items-center mb-xl">
         <div>
           <h1 style={{ fontSize: '1.75rem', fontWeight: 700, marginBottom: 'var(--spacing-xs)' }}>
-            Yatırımlar
+            Yatırım Hesapları
           </h1>
-          <p className="text-secondary">Altın, gümüş ve döviz yatırımlarınızı takip edin</p>
+          <p className="text-secondary">Farklı banka ve lokasyonlardaki yatırımlarınızı takip edin</p>
         </div>
         <div className="flex gap-md">
           <button className="btn btn-secondary" onClick={fetchPrices} disabled={pricesLoading}>
@@ -174,11 +264,17 @@ export default function YatirimlarPage() {
             </svg>
             Fiyatları Güncelle
           </button>
-          <button className="btn btn-primary" onClick={openAddModal}>
+          <button className="btn btn-secondary" onClick={() => openTransactionModal()}>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" width="18" height="18">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+            </svg>
+            Alım/Satım
+          </button>
+          <button className="btn btn-primary" onClick={openAddAccountModal}>
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" width="18" height="18">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
-            Yatırım Ekle
+            Hesap Ekle
           </button>
         </div>
       </div>
@@ -209,11 +305,8 @@ export default function YatirimlarPage() {
       <div className="card mb-xl">
         <div className="card-header">
           <h2 className="card-title">Güncel Fiyatlar</h2>
-          <span className="text-muted" style={{ fontSize: '0.75rem' }}>
-            Son güncelleme: {new Date().toLocaleTimeString('tr-TR')}
-          </span>
         </div>
-        <div className="grid grid-4" style={{ padding: 0 }}>
+        <div className="grid grid-5" style={{ padding: 0, gap: 'var(--spacing-sm)' }}>
           {Object.entries(INVESTMENT_TYPES).map(([code, info]) => (
             <div 
               key={code} 
@@ -224,17 +317,17 @@ export default function YatirimlarPage() {
                 textAlign: 'center'
               }}
             >
-              <div className="text-secondary" style={{ fontSize: '0.875rem' }}>{info.name}</div>
-              <div className="font-bold" style={{ fontSize: '1.25rem', marginTop: 'var(--spacing-xs)' }}>
+              <div className="text-secondary" style={{ fontSize: '0.75rem' }}>{info.name}</div>
+              <div className="font-bold" style={{ fontSize: '1.125rem', marginTop: 'var(--spacing-xs)' }}>
                 {prices[code] ? formatCurrency(prices[code]) : '...'}
               </div>
-              <div className="text-muted" style={{ fontSize: '0.75rem' }}>/ {info.unit}</div>
+              <div className="text-muted" style={{ fontSize: '0.7rem' }}>/ {info.unit}</div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Investments */}
+      {/* Accounts */}
       {loading ? (
         <div className="grid grid-2">
           {[1, 2, 3, 4].map(i => (
@@ -245,28 +338,28 @@ export default function YatirimlarPage() {
             </div>
           ))}
         </div>
-      ) : investments.length === 0 ? (
+      ) : accounts.length === 0 ? (
         <div className="card">
           <div className="empty-state">
             <div className="empty-state-icon">📈</div>
-            <h3 className="empty-state-title">Henüz yatırım yok</h3>
-            <p>İlk yatırımınızı ekleyerek portföyünüzü oluşturun</p>
-            <button className="btn btn-primary mt-lg" onClick={openAddModal}>
-              Yatırım Ekle
+            <h3 className="empty-state-title">Henüz yatırım hesabı yok</h3>
+            <p>Farklı banka veya lokasyonlar için yatırım hesabı oluşturun</p>
+            <button className="btn btn-primary mt-lg" onClick={openAddAccountModal}>
+              Hesap Ekle
             </button>
           </div>
         </div>
       ) : (
         <div>
-          {Object.entries(groupedInvestments).map(([type, items]) => {
+          {Object.entries(groupedAccounts).map(([type, typeAccounts]) => {
             const typeInfo = INVESTMENT_TYPES[type] || { name: type, unit: 'adet' };
             const currentPrice = prices[type];
 
             // Calculate type totals
-            const typeTotal = items.reduce((acc, inv) => {
-              acc.quantity += inv.quantity;
-              acc.cost += inv.quantity * inv.purchase_price;
-              acc.value += inv.quantity * (currentPrice || inv.purchase_price);
+            const typeTotal = typeAccounts.reduce((acc, account) => {
+              acc.quantity += account.quantity;
+              acc.cost += account.quantity * (account.average_cost || 0);
+              acc.value += account.quantity * (currentPrice || account.average_cost || 0);
               return acc;
             }, { quantity: 0, cost: 0, value: 0 });
 
@@ -275,12 +368,21 @@ export default function YatirimlarPage() {
             return (
               <div key={type} className="mb-xl">
                 <div className="flex items-center gap-md mb-md">
-                  <div className={`investment-icon ${type.toLowerCase()}`} style={{ width: 40, height: 40 }}>
+                  <div style={{ 
+                    width: 40, 
+                    height: 40, 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center',
+                    fontSize: '1.5rem',
+                    background: 'var(--bg-glass)',
+                    borderRadius: 'var(--border-radius-md)'
+                  }}>
                     {type === 'XAU' && '🪙'}
                     {type === 'XAG' && '🥈'}
-                    {type === 'USD' && '$'}
-                    {type === 'EUR' && '€'}
-                    {type === 'GBP' && '£'}
+                    {type === 'USD' && '💵'}
+                    {type === 'EUR' && '💶'}
+                    {type === 'GBP' && '💷'}
                   </div>
                   <div>
                     <h3 className="font-semibold">{typeInfo.name}</h3>
@@ -295,25 +397,38 @@ export default function YatirimlarPage() {
                 </div>
 
                 <div className="grid grid-2">
-                  {items.map(inv => {
-                    const profitLoss = calculateProfitLoss(inv.quantity, inv.purchase_price, currentPrice || inv.purchase_price);
+                  {typeAccounts.map(account => {
+                    const accountValue = account.quantity * (currentPrice || account.average_cost || 0);
+                    const accountCost = account.quantity * (account.average_cost || 0);
+                    const accountProfitLoss = accountValue - accountCost;
+                    const accountProfitPercent = accountCost > 0 ? (accountProfitLoss / accountCost) * 100 : 0;
 
                     return (
-                      <div key={inv.id} className="card">
+                      <div key={account.id} className="card">
                         <div className="flex justify-between items-start mb-md">
                           <div>
-                            <h4 className="font-medium">{inv.name}</h4>
+                            <h4 className="font-medium">{account.name}</h4>
                             <div className="text-secondary" style={{ fontSize: '0.875rem' }}>
-                              {formatDate(inv.purchase_date, 'dd MMM yyyy')}
+                              {account.is_physical ? '📦 Fiziksel' : '🏦 ' + (account.bank_name || 'Banka')}
+                              {account.location && ` - ${account.location}`}
                             </div>
                           </div>
                           <div className="flex gap-sm">
-                            <button className="btn btn-ghost btn-icon" onClick={() => openEditModal(inv)}>
+                            <button 
+                              className="btn btn-ghost btn-icon" 
+                              onClick={() => openTransactionModal(account)}
+                              title="Alım/Satım"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" width="18" height="18">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+                              </svg>
+                            </button>
+                            <button className="btn btn-ghost btn-icon" onClick={() => openEditAccountModal(account)}>
                               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" width="18" height="18">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
                               </svg>
                             </button>
-                            <button className="btn btn-ghost btn-icon text-danger" onClick={() => handleDelete(inv.id)}>
+                            <button className="btn btn-ghost btn-icon text-danger" onClick={() => handleDeleteAccount(account.id)}>
                               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" width="18" height="18">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
                               </svg>
@@ -324,42 +439,38 @@ export default function YatirimlarPage() {
                         <div className="grid grid-2 gap-md">
                           <div>
                             <div className="text-muted" style={{ fontSize: '0.75rem' }}>Miktar</div>
-                            <div className="font-medium">{inv.quantity} {typeInfo.unit}</div>
+                            <div className="font-medium">{account.quantity.toFixed(4)} {typeInfo.unit}</div>
                           </div>
                           <div>
-                            <div className="text-muted" style={{ fontSize: '0.75rem' }}>Alış Fiyatı</div>
-                            <div className="font-medium">{formatCurrency(inv.purchase_price)} / {typeInfo.unit}</div>
+                            <div className="text-muted" style={{ fontSize: '0.75rem' }}>Ort. Maliyet</div>
+                            <div className="font-medium">{formatCurrency(account.average_cost || 0)} / {typeInfo.unit}</div>
                           </div>
                           <div>
-                            <div className="text-muted" style={{ fontSize: '0.75rem' }}>Maliyet</div>
-                            <div className="font-medium">{formatCurrency(profitLoss.totalCost)}</div>
+                            <div className="text-muted" style={{ fontSize: '0.75rem' }}>Toplam Maliyet</div>
+                            <div className="font-medium">{formatCurrency(accountCost)}</div>
                           </div>
                           <div>
                             <div className="text-muted" style={{ fontSize: '0.75rem' }}>Güncel Değer</div>
-                            <div className="font-medium">{formatCurrency(profitLoss.currentValue)}</div>
+                            <div className="font-medium">{formatCurrency(accountValue)}</div>
                           </div>
                         </div>
 
-                        <div 
-                          className={`mt-md ${profitLoss.isProfit ? 'text-success' : 'text-danger'}`}
-                          style={{ 
-                            padding: 'var(--spacing-sm) var(--spacing-md)',
-                            background: profitLoss.isProfit ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                            borderRadius: 'var(--border-radius-sm)',
-                            textAlign: 'center'
-                          }}
-                        >
-                          <span className="font-bold">
-                            {profitLoss.isProfit ? '+' : ''}{formatCurrency(profitLoss.profitLoss)}
-                          </span>
-                          <span style={{ marginLeft: 'var(--spacing-sm)' }}>
-                            ({profitLoss.profitLossPercent >= 0 ? '+' : ''}{profitLoss.profitLossPercent.toFixed(2)}%)
-                          </span>
-                        </div>
-
-                        {inv.notes && (
-                          <div className="text-muted mt-md" style={{ fontSize: '0.875rem', fontStyle: 'italic' }}>
-                            {inv.notes}
+                        {account.quantity > 0 && (
+                          <div 
+                            className={`mt-md ${accountProfitLoss >= 0 ? 'text-success' : 'text-danger'}`}
+                            style={{ 
+                              padding: 'var(--spacing-sm) var(--spacing-md)',
+                              background: accountProfitLoss >= 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                              borderRadius: 'var(--border-radius-sm)',
+                              textAlign: 'center'
+                            }}
+                          >
+                            <span className="font-bold">
+                              {accountProfitLoss >= 0 ? '+' : ''}{formatCurrency(accountProfitLoss)}
+                            </span>
+                            <span style={{ marginLeft: 'var(--spacing-sm)' }}>
+                              ({accountProfitPercent >= 0 ? '+' : ''}{accountProfitPercent.toFixed(2)}%)
+                            </span>
                           </div>
                         )}
                       </div>
@@ -372,20 +483,66 @@ export default function YatirimlarPage() {
         </div>
       )}
 
-      {/* Add/Edit Modal */}
+      {/* Recent Transactions */}
+      {transactions.length > 0 && (
+        <div className="card mt-xl">
+          <div className="card-header">
+            <h2 className="card-title">Son İşlemler</h2>
+          </div>
+          <div className="table-container">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Tarih</th>
+                  <th>Hesap</th>
+                  <th>Tür</th>
+                  <th className="text-right">Miktar</th>
+                  <th className="text-right">Birim Fiyat</th>
+                  <th className="text-right">Toplam</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.slice(0, 10).map(tx => {
+                  const account = accounts.find(a => a.id === tx.account_id);
+                  const typeInfo = INVESTMENT_TYPES[account?.type] || { unit: 'adet' };
+                  return (
+                    <tr key={tx.id}>
+                      <td>{formatDate(tx.transaction_date, 'dd MMM yyyy')}</td>
+                      <td>{account?.name || '-'}</td>
+                      <td>
+                        <span className={`badge ${tx.type === 'buy' ? 'badge-success' : 'badge-danger'}`}>
+                          {tx.type === 'buy' ? 'Alış' : 'Satış'}
+                        </span>
+                      </td>
+                      <td className="text-right">{tx.quantity} {typeInfo.unit}</td>
+                      <td className="text-right">{formatCurrency(tx.price_per_unit)}</td>
+                      <td className={`text-right font-bold ${tx.type === 'buy' ? 'text-danger' : 'text-success'}`}>
+                        {tx.type === 'buy' ? '-' : '+'}{formatCurrency(tx.total_amount)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Add/Edit Account Modal */}
       <Modal 
-        isOpen={modalOpen} 
-        onClose={() => setModalOpen(false)}
-        title={editingInvestment ? 'Yatırım Düzenle' : 'Yeni Yatırım Ekle'}
+        isOpen={accountModalOpen} 
+        onClose={() => setAccountModalOpen(false)}
+        title={editingAccount ? 'Hesap Düzenle' : 'Yeni Yatırım Hesabı'}
       >
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleAccountSubmit}>
           <div className="form-group">
             <label className="form-label">Yatırım Türü *</label>
             <select
               className="form-select"
-              value={formData.type}
-              onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+              value={accountFormData.type}
+              onChange={(e) => setAccountFormData({ ...accountFormData, type: e.target.value })}
               required
+              disabled={editingAccount}
             >
               {Object.entries(INVESTMENT_TYPES).map(([code, info]) => (
                 <option key={code} value={code}>{info.name}</option>
@@ -394,15 +551,117 @@ export default function YatirimlarPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Yatırım Adı *</label>
+            <label className="form-label">Hesap Adı *</label>
             <input
               type="text"
               className="form-input"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              placeholder="Örn: Gram Altın - Ocak 2024"
+              value={accountFormData.name}
+              onChange={(e) => setAccountFormData({ ...accountFormData, name: e.target.value })}
+              placeholder="Örn: Kuveyt Türk Altın Hesabı"
               required
             />
+          </div>
+
+          <div className="form-group">
+            <label className="form-checkbox">
+              <input
+                type="checkbox"
+                checked={accountFormData.is_physical}
+                onChange={(e) => setAccountFormData({ ...accountFormData, is_physical: e.target.checked })}
+              />
+              <span>Fiziksel yatırım (kasa, çelik kasa, vb.)</span>
+            </label>
+          </div>
+
+          {!accountFormData.is_physical && (
+            <div className="form-group">
+              <label className="form-label">Banka</label>
+              <input
+                type="text"
+                className="form-input"
+                value={accountFormData.bank_name}
+                onChange={(e) => setAccountFormData({ ...accountFormData, bank_name: e.target.value })}
+                placeholder="Örn: Kuveyt Türk"
+              />
+            </div>
+          )}
+
+          <div className="form-group">
+            <label className="form-label">Konum / Açıklama</label>
+            <input
+              type="text"
+              className="form-input"
+              value={accountFormData.location}
+              onChange={(e) => setAccountFormData({ ...accountFormData, location: e.target.value })}
+              placeholder={accountFormData.is_physical ? "Örn: Evde, Çelik kasa" : "Örn: Vadeli hesap"}
+            />
+          </div>
+
+          <div className="modal-footer" style={{ padding: 0, marginTop: 'var(--spacing-lg)', borderTop: 'none' }}>
+            <button type="button" className="btn btn-secondary" onClick={() => setAccountModalOpen(false)}>
+              İptal
+            </button>
+            <button type="submit" className="btn btn-primary">
+              {editingAccount ? 'Güncelle' : 'Hesap Oluştur'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Transaction Modal (Buy/Sell) */}
+      <Modal 
+        isOpen={transactionModalOpen} 
+        onClose={() => setTransactionModalOpen(false)}
+        title="Alım / Satım İşlemi"
+      >
+        <form onSubmit={handleTransactionSubmit}>
+          <div className="form-group">
+            <label className="form-label">Hesap *</label>
+            <select
+              className="form-select"
+              value={txFormData.account_id}
+              onChange={(e) => {
+                const account = accounts.find(a => a.id === e.target.value);
+                setTxFormData({ 
+                  ...txFormData, 
+                  account_id: e.target.value,
+                  price_per_unit: prices[account?.type] || ''
+                });
+              }}
+              required
+            >
+              <option value="">Hesap seçin</option>
+              {accounts.map(acc => {
+                const typeInfo = INVESTMENT_TYPES[acc.type] || { name: acc.type, unit: 'adet' };
+                return (
+                  <option key={acc.id} value={acc.id}>
+                    {acc.name} ({acc.quantity.toFixed(2)} {typeInfo.unit})
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">İşlem Türü</label>
+            <div className="flex gap-md">
+              <button
+                type="button"
+                className={`btn ${txFormData.type === 'buy' ? 'btn-success' : 'btn-secondary'}`}
+                style={{ flex: 1 }}
+                onClick={() => setTxFormData({ ...txFormData, type: 'buy' })}
+              >
+                ↓ Alış
+              </button>
+              <button
+                type="button"
+                className={`btn ${txFormData.type === 'sell' ? 'btn-danger' : 'btn-secondary'}`}
+                style={{ flex: 1 }}
+                onClick={() => setTxFormData({ ...txFormData, type: 'sell' })}
+              >
+                ↑ Satış
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-2">
@@ -412,20 +671,20 @@ export default function YatirimlarPage() {
                 type="number"
                 step="0.0001"
                 className="form-input"
-                value={formData.quantity}
-                onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
+                value={txFormData.quantity}
+                onChange={(e) => setTxFormData({ ...txFormData, quantity: e.target.value })}
                 placeholder="10.5"
                 required
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Birim Alış Fiyatı (₺) *</label>
+              <label className="form-label">Birim Fiyat (₺) *</label>
               <input
                 type="number"
                 step="0.01"
                 className="form-input"
-                value={formData.purchase_price}
-                onChange={(e) => setFormData({ ...formData, purchase_price: e.target.value })}
+                value={txFormData.price_per_unit}
+                onChange={(e) => setTxFormData({ ...txFormData, price_per_unit: e.target.value })}
                 placeholder="2850.00"
                 required
               />
@@ -433,41 +692,43 @@ export default function YatirimlarPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label">Alış Tarihi</label>
+            <label className="form-label">İşlem Tarihi</label>
             <input
               type="date"
               className="form-input"
-              value={formData.purchase_date}
-              onChange={(e) => setFormData({ ...formData, purchase_date: e.target.value })}
+              value={txFormData.transaction_date}
+              onChange={(e) => setTxFormData({ ...txFormData, transaction_date: e.target.value })}
             />
           </div>
 
           <div className="form-group">
-            <label className="form-label">Notlar</label>
-            <textarea
+            <label className="form-label">Not</label>
+            <input
+              type="text"
               className="form-input"
-              rows="3"
-              value={formData.notes}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              placeholder="Opsiyonel notlar..."
-            ></textarea>
+              value={txFormData.notes}
+              onChange={(e) => setTxFormData({ ...txFormData, notes: e.target.value })}
+              placeholder="Opsiyonel not..."
+            />
           </div>
 
-          {formData.quantity && formData.purchase_price && (
+          {txFormData.quantity && txFormData.price_per_unit && (
             <div className="stat-card" style={{ marginTop: 'var(--spacing-md)' }}>
-              <div className="text-secondary" style={{ fontSize: '0.875rem' }}>Toplam Maliyet</div>
+              <div className="text-secondary" style={{ fontSize: '0.875rem' }}>
+                {txFormData.type === 'buy' ? 'Toplam Maliyet' : 'Toplam Gelir'}
+              </div>
               <div className="font-bold" style={{ fontSize: '1.25rem' }}>
-                {formatCurrency(parseFloat(formData.quantity) * parseFloat(formData.purchase_price))}
+                {formatCurrency(parseFloat(txFormData.quantity) * parseFloat(txFormData.price_per_unit))}
               </div>
             </div>
           )}
 
           <div className="modal-footer" style={{ padding: 0, marginTop: 'var(--spacing-lg)', borderTop: 'none' }}>
-            <button type="button" className="btn btn-secondary" onClick={() => setModalOpen(false)}>
+            <button type="button" className="btn btn-secondary" onClick={() => setTransactionModalOpen(false)}>
               İptal
             </button>
-            <button type="submit" className="btn btn-primary">
-              {editingInvestment ? 'Güncelle' : 'Ekle'}
+            <button type="submit" className={`btn ${txFormData.type === 'buy' ? 'btn-success' : 'btn-danger'}`}>
+              {txFormData.type === 'buy' ? 'Alış Yap' : 'Satış Yap'}
             </button>
           </div>
         </form>
