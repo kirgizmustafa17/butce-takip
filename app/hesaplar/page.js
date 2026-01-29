@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { formatCurrency, formatDate, calculateDueDate } from '@/lib/utils';
+import { formatCurrency, formatDate, calculateDueDate, calculateStatementDateForTransaction, calculateNextStatementDate } from '@/lib/utils';
 import { useToast } from '@/components/ui/Toast';
 import Modal from '@/components/ui/Modal';
 
@@ -433,7 +433,23 @@ export default function HesaplarPage() {
             <h2 className="card-title">Kart Borçları</h2>
           </div>
           <div className="grid grid-3" style={{ gap: 'var(--spacing-md)' }}>
-            {cards.filter(c => c.current_debt > 0).map(card => (
+          {cards.filter(c => c.current_debt > 0).map(card => {
+              // Calculate due date based on earliest unpaid transaction
+              const unpaidTx = (card.card_transactions || []).filter(t => !t.is_paid);
+              let dueDate;
+              if (unpaidTx.length > 0) {
+                const earliestTx = unpaidTx.reduce((earliest, t) => {
+                  const txDate = new Date(t.transaction_date);
+                  return txDate < earliest ? txDate : earliest;
+                }, new Date(unpaidTx[0].transaction_date));
+                const statementDate = calculateStatementDateForTransaction(card.statement_day, earliestTx);
+                dueDate = new Date(statementDate);
+                dueDate.setDate(dueDate.getDate() + 10);
+              } else {
+                dueDate = calculateDueDate(card.statement_day);
+              }
+              
+              return (
               <div 
                 key={card.id} 
                 style={{ 
@@ -449,7 +465,7 @@ export default function HesaplarPage() {
                   <div className="font-medium">{card.name}</div>
                   <div className="text-danger font-bold">{formatCurrency(card.current_debt)}</div>
                   <div className="text-muted" style={{ fontSize: '0.75rem' }}>
-                    Son ödeme: {formatDate(calculateDueDate(card.statement_day), 'dd MMM')}
+                    Son ödeme: {formatDate(dueDate, 'dd MMM')}
                   </div>
                 </div>
                 <button 
@@ -459,7 +475,7 @@ export default function HesaplarPage() {
                   Öde
                 </button>
               </div>
-            ))}
+            )})}
           </div>
         </div>
       )}

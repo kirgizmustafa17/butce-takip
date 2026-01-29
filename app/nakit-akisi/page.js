@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { formatCurrency, formatDate, calculateDueDate, generateCashFlowProjection } from '@/lib/utils';
+import { formatCurrency, formatDate, calculateDueDate, calculateStatementDateForTransaction, generateCashFlowProjection } from '@/lib/utils';
 import { useToast } from '@/components/ui/Toast';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -36,7 +36,7 @@ export default function NakitAkisiPage() {
       setCards(cardsData);
       setScheduledPayments(paymentsData);
 
-      // Calculate card payments
+      // Calculate card payments with due dates based on earliest transaction
       const cardPayments = cardsData.map(card => {
         const unpaidTransactions = (card.card_transactions || []).filter(t => !t.is_paid);
         const totalDue = unpaidTransactions.reduce((sum, t) => {
@@ -46,9 +46,23 @@ export default function NakitAkisiPage() {
           return sum + t.amount;
         }, 0);
 
+        // Calculate due date based on earliest unpaid transaction
+        let dueDate;
+        if (unpaidTransactions.length > 0) {
+          const earliestTx = unpaidTransactions.reduce((earliest, t) => {
+            const txDate = new Date(t.transaction_date);
+            return txDate < earliest ? txDate : earliest;
+          }, new Date(unpaidTransactions[0].transaction_date));
+          const statementDate = calculateStatementDateForTransaction(card.statement_day, earliestTx);
+          dueDate = new Date(statementDate);
+          dueDate.setDate(dueDate.getDate() + 10);
+        } else {
+          dueDate = calculateDueDate(card.statement_day);
+        }
+
         return {
           cardName: card.name,
-          dueDate: calculateDueDate(card.statement_day),
+          dueDate: dueDate,
           amount: totalDue
         };
       }).filter(p => p.amount > 0);
