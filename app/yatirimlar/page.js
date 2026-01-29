@@ -233,44 +233,68 @@ export default function YatirimlarPage() {
       return;
     }
 
-    const account = accounts.find(a => a.id === txFormData.account_id);
-    if (!account) {
+    const newAccount = accounts.find(a => a.id === txFormData.account_id);
+    if (!newAccount) {
       addToast('Hesap seçin', 'error');
       return;
     }
 
     const totalAmount = quantity * pricePerUnit;
+    const oldTx = editingTransaction;
+    const isAccountChanged = oldTx && oldTx.account_id !== txFormData.account_id;
 
-    // If editing, first reverse the old transaction
-    let workingQuantity = account.quantity;
-    let workingTotalCost = account.quantity * (account.average_cost || 0);
+    // Calculate new account balance
+    let newAccQuantity = newAccount.quantity;
+    let newAccTotalCost = newAccount.quantity * (newAccount.average_cost || 0);
 
-    if (editingTransaction) {
-      const oldTx = editingTransaction;
+    // If editing same account, reverse old transaction first
+    if (oldTx && !isAccountChanged) {
       if (oldTx.type === 'buy') {
-        workingQuantity -= oldTx.quantity;
-        workingTotalCost -= oldTx.total_amount;
+        newAccQuantity -= oldTx.quantity;
+        newAccTotalCost -= oldTx.total_amount;
       } else {
-        workingQuantity += oldTx.quantity;
+        newAccQuantity += oldTx.quantity;
       }
     }
 
-    // Check for sell: do we have enough after reversal?
-    if (txFormData.type === 'sell' && quantity > workingQuantity) {
-      addToast('Yetersiz miktar! Mevcut: ' + workingQuantity.toFixed(4), 'error');
+    // Check for sell: do we have enough?
+    if (txFormData.type === 'sell' && quantity > newAccQuantity) {
+      addToast('Yetersiz miktar! Mevcut: ' + newAccQuantity.toFixed(4), 'error');
       return;
     }
 
-    // Apply new transaction
-    let newQuantity, newAverageCost;
+    // Apply new transaction to new account
+    let finalNewQuantity, finalNewAvgCost;
 
     if (txFormData.type === 'buy') {
-      const newTotalCost = workingTotalCost + totalAmount;
-      newQuantity = workingQuantity + quantity;
-      newAverageCost = newQuantity > 0 ? newTotalCost / newQuantity : 0;
+      const finalTotalCost = newAccTotalCost + totalAmount;
+      finalNewQuantity = newAccQuantity + quantity;
+      finalNewAvgCost = finalNewQuantity > 0 ? finalTotalCost / finalNewQuantity : 0;
     } else {
-      newQuantity = workingQuantity - quantity;
-      newAverageCost = workingTotalCost > 0 && workingQuantity > 0 ? workingTotalCost / workingQuantity : account.average_cost || 0;
+      finalNewQuantity = newAccQuantity - quantity;
+      finalNewAvgCost = newAccTotalCost > 0 && newAccQuantity > 0 ? newAccTotalCost / newAccQuantity : newAccount.average_cost || 0;
+    }
+
+    // If account changed during edit, calculate old account balance
+    let oldAccQuantity, oldAccAvgCost;
+    let oldAccount = null;
+    
+    if (isAccountChanged) {
+      oldAccount = accounts.find(a => a.id === oldTx.account_id);
+      if (oldAccount) {
+        oldAccQuantity = oldAccount.quantity;
+        let oldAccTotalCost = oldAccount.quantity * (oldAccount.average_cost || 0);
+
+        // Reverse old transaction from old account
+        if (oldTx.type === 'buy') {
+          oldAccQuantity -= oldTx.quantity;
+          oldAccTotalCost -= oldTx.total_amount;
+          oldAccAvgCost = oldAccQuantity > 0 ? oldAccTotalCost / oldAccQuantity : 0;
+        } else {
+          oldAccQuantity += oldTx.quantity;
+          oldAccAvgCost = oldAccount.average_cost || 0;
+        }
+      }
     }
 
     let error;
@@ -311,14 +335,25 @@ export default function YatirimlarPage() {
       return;
     }
 
-    // Update account
+    // Update new account
     await supabase
       .from('investment_accounts')
       .update({ 
-        quantity: newQuantity,
-        average_cost: newAverageCost
+        quantity: finalNewQuantity,
+        average_cost: finalNewAvgCost
       })
-      .eq('id', account.id);
+      .eq('id', newAccount.id);
+
+    // Update old account if changed
+    if (isAccountChanged && oldAccount) {
+      await supabase
+        .from('investment_accounts')
+        .update({ 
+          quantity: oldAccQuantity,
+          average_cost: oldAccAvgCost
+        })
+        .eq('id', oldAccount.id);
+    }
 
     addToast(editingTransaction ? 'İşlem güncellendi' : (txFormData.type === 'buy' ? 'Alım kaydedildi' : 'Satış kaydedildi'), 'success');
     setTransactionModalOpen(false);
