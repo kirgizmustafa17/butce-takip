@@ -29,13 +29,13 @@ export default function NakitAkisiPage() {
       let startDate, endDate;
       
       if (currentDay >= 15) {
-        // Current period: This month 15th to Next month 14th
+        // Current period: This month 15th to 2 months later 14th
         startDate = new Date(now.getFullYear(), now.getMonth(), 15);
-        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 14);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 2, 14);
       } else {
-        // Previous period overlap: Last month 15th to This month 14th
+        // Previous period overlap: Last month 15th to Next month 14th
         startDate = new Date(now.getFullYear(), now.getMonth() - 1, 15);
-        endDate = new Date(now.getFullYear(), now.getMonth(), 14);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 14);
       }
       
       const startDateStr = format(startDate, 'yyyy-MM-dd');
@@ -190,7 +190,7 @@ export default function NakitAkisiPage() {
       <div className="flex justify-between items-center mb-xl">
         <div>
           <h1 style={{ fontSize: '1.75rem', fontWeight: 700, marginBottom: 'var(--spacing-xs)' }}>
-            Maaş Dönemi Nakit Akışı
+            2 Maaş Dönemi Nakit Akışı
           </h1>
           <p className="text-secondary">{periodTitle}</p>
         </div>
