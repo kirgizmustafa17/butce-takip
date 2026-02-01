@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { formatCurrency, formatDate, calculateDueDate, calculateStatementDateForTransaction, generateCashFlowProjection } from '@/lib/utils';
 import { useToast } from '@/components/ui/Toast';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { format } from 'date-fns';
 
 export default function NakitAkisiPage() {
   const [accounts, setAccounts] = useState([]);
