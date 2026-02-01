@@ -21,21 +21,44 @@ export default function NakitAkisiPage() {
   async function fetchData() {
     setLoading(true);
     try {
-      // Fetch future transactions from transactions table
+      // Calculate salary period dates
+      const now = new Date();
+      const currentDay = now.getDate();
+      
+      let startDate, endDate;
+      
+      if (currentDay >= 15) {
+        // Current period: This month 15th to Next month 14th
+        startDate = new Date(now.getFullYear(), now.getMonth(), 15);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 14);
+      } else {
+        // Previous period overlap: Last month 15th to This month 14th
+        startDate = new Date(now.getFullYear(), now.getMonth() - 1, 15);
+        endDate = new Date(now.getFullYear(), now.getMonth(), 14);
+      }
+      
+      const startDateStr = format(startDate, 'yyyy-MM-dd');
+      const endDateStr = format(endDate, 'yyyy-MM-dd');
+
       const todayStr = new Date().toISOString().split('T')[0];
-      const [accountsRes, cardsRes, paymentsRes, futureTransactionsRes] = await Promise.all([
+      
+      const [accountsRes, cardsRes, paymentsRes, transactionsRes] = await Promise.all([
         supabase.from('bank_accounts').select('*'),
         supabase.from('credit_cards').select('*, card_transactions(*)'),
-        // Get all payments, not just incomplete ones - we'll filter by date in projection
+        // Get all payments for this period
         supabase.from('scheduled_payments').select('*').order('payment_date'),
-        // Get future transactions from transactions table
-        supabase.from('transactions').select('*').gte('transaction_date', todayStr).order('transaction_date'),
+        // Get ALL transactions for this period (past and future)
+        supabase.from('transactions')
+          .select('*')
+          .gte('transaction_date', startDateStr)
+          .lte('transaction_date', endDateStr)
+          .order('transaction_date'),
       ]);
 
       const accountsData = accountsRes.data || [];
       const cardsData = cardsRes.data || [];
       const paymentsData = paymentsRes.data || [];
-      const futureTransactionsData = futureTransactionsRes.data || [];
+      const transactionsData = transactionsRes.data || [];
 
       setAccounts(accountsData);
       setCards(cardsData);
@@ -83,9 +106,9 @@ export default function NakitAkisiPage() {
         .filter(p => {
           // Include all pending payments scheduled for the future
           if (!p.is_completed) {
-            return new Date(p.payment_date) >= today;
+            const pDate = new Date(p.payment_date);
+            return pDate >= today && pDate <= endDate;
           }
-          // Include completed payments only if completed today (for immediate feedback)
           return false;
         })
         .map(p => ({
@@ -95,9 +118,12 @@ export default function NakitAkisiPage() {
           type: p.payment_type
         }));
       
+      // Separate transactions into past and future
+      const pastTransactions = transactionsData.filter(t => new Date(t.transaction_date) < today);
+      const futureTransactions = transactionsData.filter(t => new Date(t.transaction_date) >= today);
+      
       // Map future transactions from transactions table
-      const mappedFutureTransactions = futureTransactionsData
-        .filter(t => new Date(t.transaction_date) > today) // Only include strictly future transactions
+      const mappedFutureTransactions = futureTransactions
         .map(t => ({
           date: t.transaction_date,
           description: t.description,
@@ -111,9 +137,16 @@ export default function NakitAkisiPage() {
       const projection = generateCashFlowProjection(
         totalBalance,
         allScheduledPayments,
-        cardPayments
+        cardPayments,
+        startDate,
+        endDate,
+        pastTransactions
       );
       setCashFlow(projection);
+      
+      // Set Period Title
+      const monthNames = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+      setPeriodTitle(`${startDate.getDate()} ${monthNames[startDate.getMonth()]} - ${endDate.getDate()} ${monthNames[endDate.getMonth()]} Dönemi`);
 
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -122,6 +155,8 @@ export default function NakitAkisiPage() {
       setLoading(false);
     }
   }
+
+  const [periodTitle, setPeriodTitle] = useState('');
 
   const currentBalance = accounts.reduce((sum, acc) => sum + (acc.balance || 0), 0);
   const minBalance = Math.min(...cashFlow.map(day => day.balance));
@@ -154,9 +189,9 @@ export default function NakitAkisiPage() {
       <div className="flex justify-between items-center mb-xl">
         <div>
           <h1 style={{ fontSize: '1.75rem', fontWeight: 700, marginBottom: 'var(--spacing-xs)' }}>
-            30 Günlük Nakit Akışı
+            Maaş Dönemi Nakit Akışı
           </h1>
-          <p className="text-secondary">Gelecek 30 gün için bakiye projeksiyonu</p>
+          <p className="text-secondary">{periodTitle}</p>
         </div>
         <button className="btn btn-secondary" onClick={fetchData}>
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" width="18" height="18">
