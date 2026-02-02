@@ -40,8 +40,8 @@ export default function YatirimlarPage() {
     notes: '',
   });
 
-  // Cache duration: 10 minutes (in milliseconds)
-  const CACHE_DURATION = 10 * 60 * 1000;
+  // Cache duration: 15 minutes (in milliseconds)
+  const CACHE_DURATION = 15 * 60 * 1000;
 
   useEffect(() => {
     fetchData();
