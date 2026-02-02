@@ -13,6 +13,7 @@ export default function YatirimlarPage() {
   const [prices, setPrices] = useState({});
   const [loading, setLoading] = useState(true);
   const [pricesLoading, setPricesLoading] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState(null);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [transactionModalOpen, setTransactionModalOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState(null);
@@ -62,8 +63,11 @@ export default function YatirimlarPage() {
       const types = Object.keys(INVESTMENT_TYPES);
       const priceData = await fetchMultiplePrices(types);
       setPrices(priceData);
+      setLastUpdate(new Date());
+      addToast('Fiyatlar güncellendi', 'success');
     } catch (error) {
       console.error('Price fetch error:', error);
+      addToast('Fiyatlar güncellenemedi', 'error');
     }
     setPricesLoading(false);
   }
@@ -227,7 +231,7 @@ export default function YatirimlarPage() {
 
     const quantity = parseFloat(txFormData.quantity);
     const pricePerUnit = parseFloat(txFormData.price_per_unit);
-    
+
     if (!quantity || quantity <= 0 || !pricePerUnit || pricePerUnit <= 0) {
       addToast('Geçerli miktar ve fiyat girin', 'error');
       return;
@@ -278,7 +282,7 @@ export default function YatirimlarPage() {
     // If account changed during edit, calculate old account balance
     let oldAccQuantity, oldAccAvgCost;
     let oldAccount = null;
-    
+
     if (isAccountChanged) {
       oldAccount = accounts.find(a => a.id === oldTx.account_id);
       if (oldAccount) {
@@ -338,7 +342,7 @@ export default function YatirimlarPage() {
     // Update new account
     await supabase
       .from('investment_accounts')
-      .update({ 
+      .update({
         quantity: finalNewQuantity,
         average_cost: finalNewAvgCost
       })
@@ -348,7 +352,7 @@ export default function YatirimlarPage() {
     if (isAccountChanged && oldAccount) {
       await supabase
         .from('investment_accounts')
-        .update({ 
+        .update({
           quantity: oldAccQuantity,
           average_cost: oldAccAvgCost
         })
@@ -406,7 +410,12 @@ export default function YatirimlarPage() {
           </h1>
           <p className="text-secondary">Farklı banka ve lokasyonlardaki yatırımlarınızı takip edin</p>
         </div>
-        <div className="flex gap-md">
+        <div className="flex gap-md items-center">
+          {lastUpdate && (
+            <div className="text-muted" style={{ fontSize: '0.75rem' }}>
+              Son güncelleme: {lastUpdate.toLocaleTimeString()}
+            </div>
+          )}
           <button className="btn btn-secondary" onClick={fetchPrices} disabled={pricesLoading}>
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" width="18" height="18" style={{ animation: pricesLoading ? 'spin 1s linear infinite' : 'none' }}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
@@ -493,11 +502,11 @@ export default function YatirimlarPage() {
             return (
               <div key={type} className="mb-xl">
                 <div className="flex items-center gap-md mb-md">
-                  <div style={{ 
-                    width: 40, 
-                    height: 40, 
-                    display: 'flex', 
-                    alignItems: 'center', 
+                  <div style={{
+                    width: 40,
+                    height: 40,
+                    display: 'flex',
+                    alignItems: 'center',
                     justifyContent: 'center',
                     fontSize: '1.5rem',
                     background: 'var(--bg-glass)',
@@ -512,7 +521,7 @@ export default function YatirimlarPage() {
                   <div>
                     <h3 className="font-semibold">{typeInfo.name}</h3>
                     <div className="text-secondary" style={{ fontSize: '0.875rem' }}>
-                      Toplam: {typeTotal.quantity.toFixed(4)} {typeInfo.unit} • 
+                      Toplam: {typeTotal.quantity.toFixed(4)} {typeInfo.unit} •
                       Değer: {formatCurrency(typeTotal.value)} •
                       <span className={typeProfitLoss >= 0 ? 'text-success' : 'text-danger'}>
                         {' '}{typeProfitLoss >= 0 ? '+' : ''}{formatCurrency(typeProfitLoss)}
@@ -539,8 +548,8 @@ export default function YatirimlarPage() {
                             </div>
                           </div>
                           <div className="flex gap-sm">
-                            <button 
-                              className="btn btn-ghost btn-icon" 
+                            <button
+                              className="btn btn-ghost btn-icon"
                               onClick={() => openTransactionModal(account)}
                               title="Alım/Satım"
                             >
@@ -581,9 +590,9 @@ export default function YatirimlarPage() {
                         </div>
 
                         {account.quantity > 0 && (
-                          <div 
+                          <div
                             className={`mt-md ${accountProfitLoss >= 0 ? 'text-success' : 'text-danger'}`}
-                            style={{ 
+                            style={{
                               padding: 'var(--spacing-sm) var(--spacing-md)',
                               background: accountProfitLoss >= 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
                               borderRadius: 'var(--border-radius-sm)',
@@ -651,8 +660,8 @@ export default function YatirimlarPage() {
                       </td>
                       <td className="text-right">
                         <div className="flex gap-sm justify-end">
-                          <button 
-                            className="btn btn-ghost btn-icon" 
+                          <button
+                            className="btn btn-ghost btn-icon"
                             onClick={() => openEditTransactionModal(tx)}
                             title="Düzenle"
                           >
@@ -660,8 +669,8 @@ export default function YatirimlarPage() {
                               <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
                             </svg>
                           </button>
-                          <button 
-                            className="btn btn-ghost btn-icon text-danger" 
+                          <button
+                            className="btn btn-ghost btn-icon text-danger"
                             onClick={() => handleDeleteTransaction(tx)}
                             title="Sil"
                           >
@@ -681,8 +690,8 @@ export default function YatirimlarPage() {
       )}
 
       {/* Add/Edit Account Modal */}
-      <Modal 
-        isOpen={accountModalOpen} 
+      <Modal
+        isOpen={accountModalOpen}
         onClose={() => setAccountModalOpen(false)}
         title={editingAccount ? 'Hesap Düzenle' : 'Yeni Yatırım Hesabı'}
       >
@@ -761,8 +770,8 @@ export default function YatirimlarPage() {
       </Modal>
 
       {/* Transaction Modal (Buy/Sell) */}
-      <Modal 
-        isOpen={transactionModalOpen} 
+      <Modal
+        isOpen={transactionModalOpen}
         onClose={() => { setTransactionModalOpen(false); setEditingTransaction(null); }}
         title={editingTransaction ? 'İşlem Düzenle' : 'Alım / Satım İşlemi'}
       >
@@ -774,8 +783,8 @@ export default function YatirimlarPage() {
               value={txFormData.account_id}
               onChange={(e) => {
                 const account = accounts.find(a => a.id === e.target.value);
-                setTxFormData({ 
-                  ...txFormData, 
+                setTxFormData({
+                  ...txFormData,
                   account_id: e.target.value,
                   price_per_unit: prices[account?.type] || ''
                 });
