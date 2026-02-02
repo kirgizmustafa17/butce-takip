@@ -86,10 +86,18 @@ export default function YatirimlarPage() {
       // So if this is called without force, it logic implies we WANT to fetch (e.g. cache expired)
 
       const types = Object.keys(INVESTMENT_TYPES);
-      const priceData = await fetchMultiplePrices(types);
+      const { prices: priceData, updateDate } = await fetchMultiplePrices(types);
       setPrices(priceData);
 
-      const now = new Date();
+      let now;
+      if (updateDate) {
+        // Truncgil format: "yyyy-MM-dd HH:mm:ss" -> ISO: "yyyy-MM-ddTHH:mm:ss"
+        // Replace space with T for valid Date parsing
+        now = new Date(updateDate.replace(' ', 'T'));
+      } else {
+        now = new Date();
+      }
+
       setLastUpdate(now);
 
       // Save to cache
