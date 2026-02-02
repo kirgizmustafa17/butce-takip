@@ -21,7 +21,17 @@ export async function GET() {
             );
         }
 
-        const data = await response.json();
+        let data = await response.json();
+
+        // The upstream API returns a stringified JSON body (double-encoded possibly), so parse it if it's a string
+        if (typeof data === 'string') {
+            try {
+                data = JSON.parse(data);
+            } catch (error) {
+                console.error('Error parsing upstream JSON string:', error);
+            }
+        }
+
         return NextResponse.json(data);
     } catch (error) {
         console.error('Proxy API error:', error);
