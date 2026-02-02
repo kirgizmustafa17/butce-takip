@@ -91,12 +91,44 @@ export default function YatirimlarPage() {
 
       let now;
       if (updateDate) {
-        // Truncgil format: "yyyy-MM-dd HH:mm:ss" -> ISO: "yyyy-MM-ddTHH:mm:ss"
-        // Replace space with T for valid Date parsing
-        now = new Date(updateDate.replace(' ', 'T'));
+        // Goldpricez format: "DD-MM-YYYY hh:mm:ss am/pm" (e.g., "02-02-2026 03:08:59 pm")
+        try {
+          // Split date and time parts
+          // We can use a regex or string splitting
+          // "02-02-2026 03:08:59 pm" -> parts
+          const parts = updateDate.match(/(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2}):(\d{2})\s+(am|pm)/i);
+
+          if (parts) {
+            const [_, day, month, year, hours, minutes, seconds, meridiem] = parts;
+            let hour = parseInt(hours, 10);
+
+            // Convert to 24-hour format
+            if (meridiem.toLowerCase() === 'pm' && hour < 12) hour += 12;
+            if (meridiem.toLowerCase() === 'am' && hour === 12) hour = 0;
+
+            // Construct ISO string components manually or use Date constructor
+            // Note: Month is 0-indexed in Date constructor
+            now = new Date(year, parseInt(month, 10) - 1, day, hour, parseInt(minutes, 10), parseInt(seconds, 10));
+          } else {
+            // Fallback checking if it is already ISO or another parseable format
+            const tryDate = new Date(updateDate);
+            if (!isNaN(tryDate.getTime())) {
+              now = tryDate;
+            } else {
+              console.warn('Could not parse date:', updateDate);
+              now = new Date();
+            }
+          }
+        } catch (e) {
+          console.error('Date parsing error:', e);
+          now = new Date();
+        }
       } else {
         now = new Date();
       }
+
+      // Validate result
+      if (isNaN(now.getTime())) now = new Date();
 
       setLastUpdate(now);
 
