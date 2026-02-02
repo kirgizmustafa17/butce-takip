@@ -66,8 +66,17 @@ export async function GET() {
             try {
                 const [hours, minutes] = goldTime.split(':');
                 const now = new Date();
-                now.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-                data.updateDate = now.toISOString();
+
+                // Construct a date string in TRT (UTC+3)
+                // Format: YYYY-MM-DDTHH:mm:00+03:00
+                const year = now.getFullYear();
+                const month = String(now.getMonth() + 1).padStart(2, '0');
+                const day = String(now.getDate()).padStart(2, '0');
+
+                const trTime = `${year}-${month}-${day}T${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}:00+03:00`;
+
+                // Parse this string - javascript correctly handles the offset
+                data.updateDate = new Date(trTime).toISOString();
             } catch (e) {
                 console.error('Time parsing error', e);
             }
