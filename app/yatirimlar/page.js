@@ -40,8 +40,28 @@ export default function YatirimlarPage() {
     notes: '',
   });
 
+  // Cache duration: 10 minutes (in milliseconds)
+  const CACHE_DURATION = 10 * 60 * 1000;
+
   useEffect(() => {
     fetchData();
+    // Check cache first
+    const cachedPrices = localStorage.getItem('investment_prices');
+    const cachedTime = localStorage.getItem('investment_last_update');
+
+    if (cachedPrices && cachedTime) {
+      const lastTime = new Date(cachedTime).getTime();
+      const now = new Date().getTime();
+
+      if (now - lastTime < CACHE_DURATION) {
+        setPrices(JSON.parse(cachedPrices));
+        setLastUpdate(new Date(cachedTime));
+        setPricesLoading(false);
+        return;
+      }
+    }
+
+    // If no cache or expired, fetch new
     fetchPrices();
   }, []);
 
@@ -57,17 +77,29 @@ export default function YatirimlarPage() {
     setLoading(false);
   }
 
-  async function fetchPrices() {
+  async function fetchPrices(force = false) {
     setPricesLoading(true);
     try {
+      // If not forcing (e.g. auto-update check) and we have valid cache, use it
+      // Note: This function is usually called by button (force=true) or initial load (force=false if we called it directly)
+      // But in useEffect we handle initial load logic separately. 
+      // So if this is called without force, it logic implies we WANT to fetch (e.g. cache expired)
+
       const types = Object.keys(INVESTMENT_TYPES);
       const priceData = await fetchMultiplePrices(types);
       setPrices(priceData);
-      setLastUpdate(new Date());
-      addToast('Fiyatlar güncellendi', 'success');
+
+      const now = new Date();
+      setLastUpdate(now);
+
+      // Save to cache
+      localStorage.setItem('investment_prices', JSON.stringify(priceData));
+      localStorage.setItem('investment_last_update', now.toISOString());
+
+      if (force) addToast('Fiyatlar güncellendi', 'success');
     } catch (error) {
       console.error('Price fetch error:', error);
-      addToast('Fiyatlar güncellenemedi', 'error');
+      if (force) addToast('Fiyatlar güncellenemedi', 'error');
     }
     setPricesLoading(false);
   }
@@ -416,7 +448,7 @@ export default function YatirimlarPage() {
               Son güncelleme: {lastUpdate.toLocaleTimeString()}
             </div>
           )}
-          <button className="btn btn-secondary" onClick={fetchPrices} disabled={pricesLoading}>
+          <button className="btn btn-secondary" onClick={() => fetchPrices(true)} disabled={pricesLoading}>
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" width="18" height="18" style={{ animation: pricesLoading ? 'spin 1s linear infinite' : 'none' }}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
             </svg>
