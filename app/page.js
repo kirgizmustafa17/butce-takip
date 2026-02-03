@@ -27,7 +27,7 @@ export default function Dashboard() {
       const [accountsRes, cardsRes, investmentsRes, paymentsRes, debtorsRes] = await Promise.all([
         supabase.from('bank_accounts').select('*').order('is_favorite', { ascending: false }),
         supabase.from('credit_cards').select('*, card_transactions(*)'),
-        supabase.from('investments').select('*'),
+        supabase.from('investment_accounts').select('*'),
         supabase.from('scheduled_payments').select('*').eq('is_completed', false).order('payment_date'),
         supabase.from('debtors').select('remaining_amount'),
       ]);
@@ -149,11 +149,11 @@ export default function Dashboard() {
     if (currentPrice) {
       return sum + (inv.quantity * currentPrice);
     }
-    return sum + (inv.quantity * inv.purchase_price);
+    return sum + (inv.quantity * (inv.average_cost || 0));
   }, 0);
 
   const totalInvestmentCost = investments.reduce((sum, inv) => {
-    return sum + (inv.quantity * inv.purchase_price);
+    return sum + (inv.quantity * (inv.average_cost || 0));
   }, 0);
 
   const investmentProfitLoss = totalInvestmentValue - totalInvestmentCost;
@@ -379,8 +379,8 @@ export default function Dashboard() {
             ) : (
               <div className="flex flex-col gap-sm">
                 {investments.slice(0, 4).map((inv) => {
-                  const currentPrice = prices[inv.type] || inv.purchase_price;
-                  const profitLoss = calculateProfitLoss(inv.quantity, inv.purchase_price, currentPrice);
+                  const currentPrice = prices[inv.type] || inv.average_cost;
+                  const profitLoss = calculateProfitLoss(inv.quantity, inv.average_cost || 0, currentPrice);
                   const typeInfo = INVESTMENT_TYPES[inv.type] || { name: inv.type, unit: 'adet' };
 
                   return (
