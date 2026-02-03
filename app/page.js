@@ -46,7 +46,7 @@ export default function Dashboard() {
       // Fetch investment prices
       const investmentTypes = [...new Set(investmentsData.map(inv => inv.type))];
       if (investmentTypes.length > 0) {
-        const priceData = await fetchMultiplePrices(investmentTypes);
+        const { prices: priceData } = await fetchMultiplePrices(investmentTypes);
         setPrices(priceData);
       }
 
@@ -92,11 +92,11 @@ export default function Dashboard() {
 
       // Generate cash flow projection
       const totalBalance = accountsData.reduce((sum, acc) => sum + (acc.balance || 0), 0);
-      
+
       // Filter to include only future pending payments
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      
+
       const mappedPayments = paymentsData
         .filter(p => !p.is_completed && new Date(p.payment_date) >= today)
         .map(p => ({
@@ -105,7 +105,7 @@ export default function Dashboard() {
           amount: p.amount,
           type: p.payment_type
         }));
-      
+
       // Map future transactions from transactions table
       const mappedFutureTransactions = futureTransactionsData
         .filter(t => new Date(t.transaction_date) > today) // Only include strictly future transactions
@@ -115,10 +115,10 @@ export default function Dashboard() {
           amount: t.amount,
           type: t.type
         }));
-      
+
       // Combine all payments for projection
       const allScheduledPayments = [...mappedPayments, ...mappedFutureTransactions];
-      
+
       const projection = generateCashFlowProjection(
         totalBalance,
         allScheduledPayments,
@@ -135,14 +135,14 @@ export default function Dashboard() {
 
   // Calculate totals
   const totalCash = accounts.reduce((sum, acc) => sum + (acc.balance || 0), 0);
-  
+
   // Calculate total debt from unpaid card transactions (dynamic calculation)
   const totalDebt = cards.reduce((sum, card) => {
     const unpaidTransactions = (card.card_transactions || []).filter(t => !t.is_paid);
     const cardDebt = unpaidTransactions.reduce((txSum, t) => txSum + t.amount, 0);
     return sum + cardDebt;
   }, 0);
-  
+
   // Calculate total investment value
   const totalInvestmentValue = investments.reduce((sum, inv) => {
     const currentPrice = prices[inv.type];
@@ -158,7 +158,7 @@ export default function Dashboard() {
 
   const investmentProfitLoss = totalInvestmentValue - totalInvestmentCost;
   const netWorth = totalCash + totalInvestmentValue - totalDebt;
-  
+
   // Calculate total receivables (NOT included in netWorth as requested)
   const totalReceivable = debtors.reduce((sum, d) => sum + (d.remaining_amount || 0), 0);
 
@@ -200,7 +200,7 @@ export default function Dashboard() {
           <div className="stat-label">Yatırım Değeri</div>
           <div className="stat-value">{formatCurrency(totalInvestmentValue)}</div>
           <div className={`investment-profit ${investmentProfitLoss >= 0 ? 'positive' : 'negative'}`}>
-            {investmentProfitLoss >= 0 ? '+' : ''}{formatCurrency(investmentProfitLoss)} 
+            {investmentProfitLoss >= 0 ? '+' : ''}{formatCurrency(investmentProfitLoss)}
             ({((investmentProfitLoss / (totalInvestmentCost || 1)) * 100).toFixed(1)}%)
           </div>
         </div>
@@ -245,7 +245,7 @@ export default function Dashboard() {
             ) : (
               <div className="flex flex-col gap-sm">
                 {accounts.slice(0, 3).map((account) => (
-                  <div key={account.id} className="flex items-center justify-between" style={{ 
+                  <div key={account.id} className="flex items-center justify-between" style={{
                     padding: 'var(--spacing-md)',
                     background: 'var(--bg-glass)',
                     borderRadius: 'var(--border-radius-md)'
@@ -288,7 +288,7 @@ export default function Dashboard() {
                 {cards.slice(0, 3).map((card) => {
                   const usagePercent = ((card.used_limit || 0) / card.total_limit) * 100;
                   return (
-                    <div key={card.id} style={{ 
+                    <div key={card.id} style={{
                       padding: 'var(--spacing-md)',
                       background: 'var(--bg-glass)',
                       borderRadius: 'var(--border-radius-md)'
@@ -304,7 +304,7 @@ export default function Dashboard() {
                         </div>
                       </div>
                       <div className="progress">
-                        <div 
+                        <div
                           className={`progress-bar ${usagePercent > 80 ? 'danger' : ''}`}
                           style={{ width: `${Math.min(usagePercent, 100)}%` }}
                         ></div>
@@ -337,10 +337,10 @@ export default function Dashboard() {
               <div className="flex flex-col">
                 {upcomingPayments.map((day) => (
                   day.events.map((event, idx) => (
-                    <div 
+                    <div
                       key={`${day.dateStr}-${idx}`}
                       className="flex justify-between items-center"
-                      style={{ 
+                      style={{
                         padding: 'var(--spacing-md)',
                         borderBottom: '1px solid var(--border-color)'
                       }}
@@ -382,9 +382,9 @@ export default function Dashboard() {
                   const currentPrice = prices[inv.type] || inv.purchase_price;
                   const profitLoss = calculateProfitLoss(inv.quantity, inv.purchase_price, currentPrice);
                   const typeInfo = INVESTMENT_TYPES[inv.type] || { name: inv.type, unit: 'adet' };
-                  
+
                   return (
-                    <div key={inv.id} className="investment-card" style={{ 
+                    <div key={inv.id} className="investment-card" style={{
                       padding: 'var(--spacing-md)',
                       background: 'var(--bg-glass)',
                       borderRadius: 'var(--border-radius-md)'
