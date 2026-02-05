@@ -45,7 +45,29 @@ export default function YatirimlarPage() {
 
   useEffect(() => {
     fetchData();
-    // Check cache first
+    checkAndLoadPrices();
+
+    // Revalidation listeners
+    const handleRevalidate = () => {
+      if (document.visibilityState === 'visible') {
+        checkAndRefreshPrices();
+      }
+    };
+
+    window.addEventListener('focus', handleRevalidate);
+    document.addEventListener('visibilitychange', handleRevalidate);
+
+    // Periodic check (every 1 minute)
+    const intervalId = setInterval(handleRevalidate, 60 * 1000);
+
+    return () => {
+      window.removeEventListener('focus', handleRevalidate);
+      document.removeEventListener('visibilitychange', handleRevalidate);
+      clearInterval(intervalId);
+    };
+  }, []);
+
+  function checkAndLoadPrices() {
     const cachedPrices = localStorage.getItem('investment_prices');
     const cachedTime = localStorage.getItem('investment_last_update');
 
@@ -63,7 +85,27 @@ export default function YatirimlarPage() {
 
     // If no cache or expired, fetch new
     fetchPrices();
-  }, []);
+  }
+
+  function checkAndRefreshPrices() {
+    const cachedTime = localStorage.getItem('investment_last_update');
+
+    // If we have a cache time, check if it's expired
+    if (cachedTime) {
+      const lastTime = new Date(cachedTime).getTime();
+      const now = new Date().getTime();
+
+      // If expired, fetch new prices (force=false is fine as fetchPrices doesn't use cache internally, 
+      // but semantically we are just fetching regular updates)
+      if (now - lastTime >= CACHE_DURATION) {
+        console.log('Cache expired, refreshing prices...');
+        fetchPrices();
+      }
+    } else {
+      // No cache time? Fetch.
+      fetchPrices();
+    }
+  }
 
   async function fetchData() {
     setLoading(true);
