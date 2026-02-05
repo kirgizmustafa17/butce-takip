@@ -25,9 +25,9 @@ export default function NakitAkisiPage() {
       // Calculate salary period dates
       const now = new Date();
       const currentDay = now.getDate();
-      
+
       let startDate, endDate;
-      
+
       if (currentDay >= 15) {
         // Current period: This month 15th to 2 months later 14th
         startDate = new Date(now.getFullYear(), now.getMonth(), 15);
@@ -37,12 +37,12 @@ export default function NakitAkisiPage() {
         startDate = new Date(now.getFullYear(), now.getMonth() - 1, 15);
         endDate = new Date(now.getFullYear(), now.getMonth() + 1, 14);
       }
-      
+
       const startDateStr = format(startDate, 'yyyy-MM-dd');
       const endDateStr = format(endDate, 'yyyy-MM-dd');
 
       const todayStr = new Date().toISOString().split('T')[0];
-      
+
       const [accountsRes, cardsRes, paymentsRes, transactionsRes] = await Promise.all([
         supabase.from('bank_accounts').select('*'),
         supabase.from('credit_cards').select('*, card_transactions(*)'),
@@ -98,11 +98,11 @@ export default function NakitAkisiPage() {
 
       // Generate projection
       const totalBalance = accountsData.reduce((sum, acc) => sum + (acc.balance || 0), 0);
-      
+
       // Map payments: completed payments used their updated_at date, pending ones use payment_date
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      
+
       const mappedPayments = paymentsData
         .filter(p => {
           // Include all pending payments scheduled for the future
@@ -118,11 +118,11 @@ export default function NakitAkisiPage() {
           amount: p.amount,
           type: p.payment_type
         }));
-      
+
       // Separate transactions into past and future
       const pastTransactions = transactionsData.filter(t => new Date(t.transaction_date) < today);
       const futureTransactions = transactionsData.filter(t => new Date(t.transaction_date) >= today);
-      
+
       // Map future transactions from transactions table
       const mappedFutureTransactions = futureTransactions
         .map(t => ({
@@ -131,10 +131,10 @@ export default function NakitAkisiPage() {
           amount: t.amount,
           type: t.type
         }));
-      
+
       // Combine all payments for projection
       const allScheduledPayments = [...mappedPayments, ...mappedFutureTransactions];
-      
+
       const projection = generateCashFlowProjection(
         totalBalance,
         allScheduledPayments,
@@ -144,7 +144,7 @@ export default function NakitAkisiPage() {
         pastTransactions
       );
       setCashFlow(projection);
-      
+
       // Set Period Title
       const monthNames = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
       setPeriodTitle(`${startDate.getDate()} ${monthNames[startDate.getMonth()]} - ${endDate.getDate()} ${monthNames[endDate.getMonth()]} Dönemi`);
@@ -184,6 +184,15 @@ export default function NakitAkisiPage() {
     );
   }
 
+  // Calculate gradient offset
+  const gradientOffset = () => {
+    if (maxBalance <= 0) return 0;
+    if (minBalance >= 0) return 1;
+    return maxBalance / (maxBalance - minBalance);
+  };
+
+  const off = gradientOffset();
+
   return (
     <div className="animate-fadeIn">
       {/* Header */}
@@ -204,11 +213,11 @@ export default function NakitAkisiPage() {
 
       {/* Warning for negative balance */}
       {negativeDays.length > 0 && (
-        <div 
-          className="card mb-xl" 
-          style={{ 
-            background: 'rgba(239, 68, 68, 0.1)', 
-            borderColor: 'var(--accent-danger)' 
+        <div
+          className="card mb-xl"
+          style={{
+            background: 'rgba(239, 68, 68, 0.1)',
+            borderColor: 'var(--accent-danger)'
           }}
         >
           <div className="flex items-center gap-md">
@@ -253,37 +262,37 @@ export default function NakitAkisiPage() {
           <ResponsiveContainer>
             <AreaChart data={chartData}>
               <defs>
-                <linearGradient id="colorBakiye" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                <linearGradient id="splitColor" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset={off} stopColor="#10b981" stopOpacity={0.8} />
+                  <stop offset={off} stopColor="#ef4444" stopOpacity={0.8} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-              <XAxis 
-                dataKey="name" 
+              <XAxis
+                dataKey="name"
                 stroke="#6b6b7b"
                 tick={{ fontSize: 12 }}
               />
-              <YAxis 
+              <YAxis
                 stroke="#6b6b7b"
                 tick={{ fontSize: 12 }}
                 tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`}
               />
-              <Tooltip 
-                contentStyle={{ 
-                  background: '#1a1a2e', 
+              <Tooltip
+                contentStyle={{
+                  background: '#1a1a2e',
                   border: '1px solid rgba(255,255,255,0.1)',
                   borderRadius: 8,
                 }}
                 labelStyle={{ color: '#fff' }}
                 formatter={(value) => [formatCurrency(value), 'Bakiye']}
               />
-              <Area 
-                type="monotone" 
-                dataKey="bakiye" 
-                stroke="#6366f1" 
-                fillOpacity={1} 
-                fill="url(#colorBakiye)"
+              <Area
+                type="monotone"
+                dataKey="bakiye"
+                stroke="url(#splitColor)"
+                fill="url(#splitColor)"
+                fillOpacity={0.4}
                 strokeWidth={2}
               />
             </AreaChart>
@@ -308,9 +317,9 @@ export default function NakitAkisiPage() {
             </thead>
             <tbody>
               {cashFlow.map((day, index) => (
-                <tr 
+                <tr
                   key={day.dateStr}
-                  style={{ 
+                  style={{
                     background: day.balance < 0 ? 'rgba(239, 68, 68, 0.1)' : 'transparent'
                   }}
                 >
